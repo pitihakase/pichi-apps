@@ -93,7 +93,8 @@
 
   const W = canvas.width;
   const H = canvas.height;
-  const waterY = 642;
+  const horizonY = Math.round(H * 0.75); // 島の向こうで空と海が接する、本当の水平線
+  const waterY = 642; // 手前側の海面・ゲーム床の高さ（水平線ではない）
   const TIME_SCALE = 0.2; // ゲーム全体を元の1/5速度で進める
   // 風船の浮力が重力の大半を打ち消す、ゆっくりした空中物理
   const gravity = 0.059; // 前版より少しだけ重くして、下降を分かりやすくする
@@ -130,12 +131,17 @@
   let clear = false;
 
   const clouds = [
-    {x:120,y:140,w:120,h:28, drift:0.16},
-    {x:360,y:250,w:150,h:28, drift:0.11},
-    {x:635,y:170,w:160,h:28, drift:0.14},
-    {x:760,y:320,w:130,h:28, drift:0.09},
-    {x:180,y:385,w:150,h:28, drift:0.12},
-    {x:515,y:460,w:140,h:28, drift:0.10}
+    {x:135,y:150,w:108,h:24, drift:0.16},
+    {x:385,y:235,w:118,h:24, drift:0.11},
+    {x:680,y:175,w:112,h:24, drift:0.14}
+  ];
+
+  const horizonClouds = [
+    {x:82,  y:horizonY-28, scale:0.58, puff:0.0, drift:0.008},
+    {x:238, y:horizonY-34, scale:0.72, puff:0.8, drift:0.007},
+    {x:420, y:horizonY-30, scale:0.64, puff:1.5, drift:0.009},
+    {x:610, y:horizonY-37, scale:0.76, puff:2.1, drift:0.006},
+    {x:806, y:horizonY-29, scale:0.60, puff:2.9, drift:0.008}
   ];
 
   function makeActor(o){
@@ -1308,6 +1314,113 @@
     ctx.restore();
   }
 
+  function drawTallPalmTree(x, y, scale=1, phase=0){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    const sway = Math.sin(frame*0.055 + phase + x*0.018) * 0.24 + Math.cos(frame*0.028 + phase*1.3) * 0.08;
+    const trunkTipX = sway * 78;
+    const trunkMidX = sway * 34;
+
+    // 幹の影
+    ctx.strokeStyle = "rgba(0,0,0,0.11)";
+    ctx.lineWidth = 10;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(5, 30);
+    ctx.quadraticCurveTo(trunkMidX + 8, -8, trunkTipX + 10, -98);
+    ctx.stroke();
+
+    // 幹
+    const trunkGrad = ctx.createLinearGradient(0, 30, 0, -104);
+    trunkGrad.addColorStop(0, "#8f6238");
+    trunkGrad.addColorStop(0.45, "#a97747");
+    trunkGrad.addColorStop(1, "#c58b52");
+    ctx.strokeStyle = trunkGrad;
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(0, 28);
+    ctx.quadraticCurveTo(trunkMidX, -10, trunkTipX, -100);
+    ctx.stroke();
+
+    // 幹の節模様
+    ctx.strokeStyle = "rgba(110,70,36,0.34)";
+    ctx.lineWidth = 1.6;
+    for(let i=0;i<7;i++){
+      const t = i/6;
+      const px = (1-t)*(1-t)*0 + 2*(1-t)*t*trunkMidX + t*t*trunkTipX;
+      const py = (1-t)*(1-t)*28 + 2*(1-t)*t*(-10) + t*t*(-100);
+      const ang = sway*0.55 + Math.sin(frame*0.05 + i + phase)*0.03;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.moveTo(-7, 0);
+      ctx.lineTo(7, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 葉の付け根
+    ctx.fillStyle = "#7c4f2d";
+    ctx.beginPath();
+    ctx.ellipse(trunkTipX, -99, 8.5, 5.5, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    const leaves = [
+      {a:-2.25, len:58, w:18, color:"#37a94d"},
+      {a:-1.75, len:72, w:20, color:"#49bf5d"},
+      {a:-1.18, len:86, w:22, color:"#61cf74"},
+      {a:-0.52, len:92, w:22, color:"#72d97f"},
+      {a:0.12, len:84, w:21, color:"#64d574"},
+      {a:0.72, len:78, w:20, color:"#4cc265"},
+      {a:1.26, len:62, w:18, color:"#35aa57"},
+    ];
+    leaves.forEach((l, idx) => {
+      const flap = Math.sin(frame*0.11 + phase*1.7 + idx*0.85) * 0.22 + sway*0.65;
+      ctx.save();
+      ctx.translate(trunkTipX, -100);
+      ctx.rotate(l.a + flap);
+
+      const leafGrad = ctx.createLinearGradient(0, -5, l.len, 8);
+      leafGrad.addColorStop(0, "rgba(255,255,255,0.15)");
+      leafGrad.addColorStop(0.06, l.color);
+      leafGrad.addColorStop(1, idx % 2 === 0 ? "#2d8f49" : "#3ba55a");
+      ctx.fillStyle = leafGrad;
+
+      ctx.beginPath();
+      ctx.moveTo(-2, -2);
+      ctx.quadraticCurveTo(l.len*0.22, -l.w, l.len*0.55, -l.w*0.35);
+      ctx.quadraticCurveTo(l.len*0.92, 1, l.len, 7);
+      ctx.quadraticCurveTo(l.len*0.58, l.w*0.46, 1, 6);
+      ctx.quadraticCurveTo(-3, 2, -2, -2);
+      ctx.closePath();
+      ctx.fill();
+
+      // 葉の筋
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(0, 1);
+      ctx.quadraticCurveTo(l.len*0.48, -3, l.len*0.92, 4);
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // ココナッツ
+    ctx.fillStyle = "#9a5d31";
+    for(let i=0;i<3;i++){
+      const cx = trunkTipX + Math.cos(phase + i*1.8) * 7;
+      const cy = -88 + Math.sin(frame*0.06 + i + phase)*1.5 + i*2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 5.8, 5.2, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawTinyIsland(x=162, y=waterY-78, scale=1){
     ctx.save();
     ctx.translate(x + Math.sin(frame*0.018 + x*0.01)*2.2, y + Math.cos(frame*0.026 + x*0.008)*1.8);
@@ -1317,24 +1430,29 @@
     // ちいさな島の水影
     ctx.fillStyle = "rgba(53,143,196,0.22)";
     ctx.beginPath();
-    ctx.ellipse(0, 22, 74 + Math.sin(frame*0.04 + x*0.01)*1.5, 12, 0, 0, Math.PI*2);
+    ctx.ellipse(0, 24, 78 + Math.sin(frame*0.04 + x*0.01)*1.5, 13, 0, 0, Math.PI*2);
     ctx.fill();
 
     ctx.fillStyle = "#f7df94";
     ctx.beginPath();
-    ctx.ellipse(0, 0, 70, 22, 0, 0, Math.PI*2);
+    ctx.ellipse(0, 0, 72, 24, 0, 0, Math.PI*2);
     ctx.fill();
     ctx.fillStyle = "#f2c56d";
     ctx.beginPath();
-    ctx.ellipse(6, 8, 58, 15, 0, 0, Math.PI*2);
+    ctx.ellipse(6, 9, 60, 16, 0, 0, Math.PI*2);
     ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,0.35)";
     ctx.beginPath();
-    ctx.ellipse(-10, -6, 24, 7, 0, 0, Math.PI*2);
+    ctx.ellipse(-12, -7, 24, 7, 0, 0, Math.PI*2);
     ctx.fill();
-    drawBananaTree(-18, -4, 0.82);
-    drawBananaTree(8, -6, 0.92);
-    drawBananaTree(32, -2, 0.72);
+
+    // 背の高いヤシの木を植える
+    drawTallPalmTree(-20, 4, 0.92, 0.4 + x*0.003);
+    drawTallPalmTree(12, 0, 1.04, 1.35 + x*0.004);
+    drawTallPalmTree(36, 6, 0.82, 2.1 + x*0.002);
+
+    // 低めの緑も少し残す
+    drawBananaTree(-40, 4, 0.54);
     ctx.restore();
   }
 
@@ -1593,11 +1711,20 @@ function drawBackground(){
     }
     ctx.restore();
 
-    const sunX = W - 132 + Math.sin(frame*0.012) * 1.8;
-    const sunY = 92 + Math.sin(frame*0.02) * 2.2;
+    const skyWobbleX = Math.sin(frame*0.013) * 3.2;
+    const skyWobbleY = Math.cos(frame*0.017) * 1.8;
+
+    const sunX = W - 132 + Math.sin(frame*0.012) * 1.8 + skyWobbleX*0.35;
+    const sunY = 92 + Math.sin(frame*0.02) * 2.2 + skyWobbleY*0.5;
+    const sunPulse = 1 + Math.sin(frame*0.058) * 0.065 + Math.sin(frame*0.021 + 1.4) * 0.028;
+    const sunSquishX = 1 + Math.sin(frame*0.048 + 0.8) * 0.035;
+    const sunSquishY = 1 + Math.cos(frame*0.048 + 0.8) * 0.03;
     drawSunRays(sunX, sunY);
     ctx.save();
     ctx.translate(sunX, sunY);
+    ctx.scale(sunPulse * sunSquishX, sunPulse * sunSquishY);
+    ctx.fillStyle = "rgba(255,240,150,0.18)";
+    ctx.beginPath(); ctx.arc(0,0,54 + Math.sin(frame*0.05)*2.2,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = "#ffe66d";
     ctx.beginPath(); ctx.arc(0,0,42,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.34)";
@@ -1609,50 +1736,271 @@ function drawBackground(){
     ctx.beginPath(); ctx.arc(0,8,12,0.08*Math.PI,0.92*Math.PI,false); ctx.stroke();
     ctx.restore();
 
-    // うねうね雲：全部ちょっとずつ形と位置が動く
+    // うねうね雲：もこもこ感を増やしつつ、半透明でふわっとした質感にする
     clouds.forEach((c, idx) => {
-      const bob = Math.sin(frame*0.012 + idx*0.8) * 3.5;
-      const sway = Math.sin(frame*0.018 + idx*1.15) * 8;
-      const puffA = 20 + Math.sin(frame*0.042 + idx*0.7) * 2.4;
-      const puffB = 26 + Math.sin(frame*0.037 + idx*1.1) * 2.8;
-      const puffC = 22 + Math.sin(frame*0.04 + idx*0.9 + 1.4) * 2.3;
-      const puffD = 16 + Math.sin(frame*0.045 + idx*0.6 + 2.1) * 1.9;
+      const bob = Math.sin(frame*0.014 + idx*0.8) * 5.8;
+      const sway = Math.sin(frame*0.021 + idx*1.15) * 14;
+      const driftWave = Math.sin(frame*0.009 + idx*1.7) * 6.5;
+      const rotate = Math.sin(frame*0.016 + idx*0.93) * 0.055;
+      const stretchX = 1 + Math.sin(frame*0.029 + idx*0.9) * 0.05;
+      const stretchY = 1 + Math.cos(frame*0.027 + idx*0.75) * 0.05;
+      const puffA = 18 + Math.sin(frame*0.052 + idx*0.7) * 3.0;
+      const puffB = 24 + Math.sin(frame*0.047 + idx*1.1) * 3.8;
+      const puffC = 20 + Math.sin(frame*0.05 + idx*0.9 + 1.4) * 3.0;
+      const puffD = 17 + Math.sin(frame*0.055 + idx*0.6 + 2.1) * 2.6;
+      const puffE = 14 + Math.sin(frame*0.049 + idx*1.35 + 0.9) * 2.2;
+      const puffF = 13 + Math.sin(frame*0.053 + idx*0.82 + 2.7) * 2.0;
+      const centerX = c.x + 58;
+      const centerY = c.y + 16 + bob;
+      const bodyW = 112 + Math.sin(frame*0.025 + idx)*4.5;
+      const bodyH = 34 + Math.cos(frame*0.022 + idx*0.9)*2.8;
+
       ctx.save();
-      ctx.translate(sway, 0);
-      ctx.fillStyle = "rgba(255,255,255,.97)";
+      ctx.translate(skyWobbleX + sway + driftWave, skyWobbleY*0.8 + bob*0.4);
+      ctx.translate(centerX, centerY);
+      ctx.rotate(rotate);
+      ctx.scale(stretchX, stretchY);
+      ctx.translate(-centerX, -centerY);
+
+      // 外側のふんわりした透明ベール
+      const halo = ctx.createRadialGradient(centerX, centerY + 2, 12, centerX, centerY + 2, 82);
+      halo.addColorStop(0, "rgba(255,255,255,0.28)");
+      halo.addColorStop(0.45, "rgba(255,255,255,0.16)");
+      halo.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(c.x+24, c.y+14+bob+Math.sin(frame*0.034+idx)*1.4, puffA, Math.PI*0.95, Math.PI*0.1, true);
-      ctx.arc(c.x+50, c.y+6+bob+Math.sin(frame*0.03+idx*1.3)*1.2, puffB, Math.PI, 0, true);
-      ctx.arc(c.x+80, c.y+14+bob+Math.sin(frame*0.033+idx*0.8+0.7)*1.5, puffC, Math.PI, 0, true);
-      ctx.arc(c.x+100, c.y+18+bob+Math.sin(frame*0.04+idx*0.5+1.4)*1.1, puffD, Math.PI, 0, true);
-      ctx.closePath();
+      ctx.ellipse(centerX, centerY + 3, bodyW*0.70, bodyH*1.15, 0, 0, Math.PI*2);
       ctx.fill();
 
-      ctx.strokeStyle = "rgba(255,255,255,0.34)";
-      ctx.lineWidth = 1.4;
+      // 下側の青み影
+      const underShadow = ctx.createRadialGradient(centerX, c.y + 28 + bob, 8, centerX, c.y + 28 + bob, 68);
+      underShadow.addColorStop(0, "rgba(164,212,255,0.24)");
+      underShadow.addColorStop(0.58, "rgba(182,224,255,0.12)");
+      underShadow.addColorStop(1, "rgba(182,224,255,0)");
+      ctx.fillStyle = underShadow;
       ctx.beginPath();
-      for (let x=0; x<=96; x+=12){
-        const px = c.x + x + 4;
-        const py = c.y + 22 + bob + Math.sin(frame*0.045 + idx + x*0.06) * 2.2;
+      ctx.ellipse(centerX, c.y + 28 + bob, bodyW*0.56, bodyH*0.52, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // 雲本体：少し透明感のある白
+      const cloudBody = ctx.createLinearGradient(0, c.y - 10 + bob, 0, c.y + 48 + bob);
+      cloudBody.addColorStop(0, "rgba(255,255,255,0.94)");
+      cloudBody.addColorStop(0.48, "rgba(252,253,255,0.86)");
+      cloudBody.addColorStop(0.78, "rgba(242,249,255,0.76)");
+      cloudBody.addColorStop(1, "rgba(224,239,251,0.68)");
+      ctx.fillStyle = cloudBody;
+      ctx.beginPath();
+      ctx.ellipse(c.x+14, c.y+19+bob+Math.sin(frame*0.047+idx)*1.5, puffE, 11, -0.18, 0, Math.PI*2);
+      ctx.ellipse(c.x+28, c.y+14+bob+Math.sin(frame*0.044+idx)*1.7, puffA, 16, -0.10, 0, Math.PI*2);
+      ctx.ellipse(c.x+50, c.y+5+bob+Math.sin(frame*0.04+idx*1.3)*1.8, puffB, 23, 0.02, 0, Math.PI*2);
+      ctx.ellipse(c.x+72, c.y+11+bob+Math.sin(frame*0.043+idx*0.8+0.7)*1.9, puffC, 19, 0.08, 0, Math.PI*2);
+      ctx.ellipse(c.x+92, c.y+17+bob+Math.sin(frame*0.05+idx*0.5+1.4)*1.5, puffD, 14, 0.12, 0, Math.PI*2);
+      ctx.ellipse(c.x+108, c.y+21+bob+Math.sin(frame*0.046+idx*1.1+1.8)*1.3, puffF, 10, 0.18, 0, Math.PI*2);
+      ctx.ellipse(centerX, c.y+24+bob, bodyW*0.50, bodyH*0.46, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // もこもこの谷間のやわらかい影
+      ctx.fillStyle = "rgba(183,213,238,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(c.x+40, c.y+22+bob, 17, 7.4, -0.18, 0, Math.PI*2);
+      ctx.ellipse(c.x+63, c.y+24+bob, 20, 7.8, 0.04, 0, Math.PI*2);
+      ctx.ellipse(c.x+85, c.y+24+bob, 15, 6.6, 0.16, 0, Math.PI*2);
+      ctx.fill();
+
+      // ほんのりピンクと白の透けハイライト
+      ctx.fillStyle = "rgba(255,228,242,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(centerX + 2, c.y+21+bob, 40, 8.5, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
+      ctx.beginPath();
+      ctx.ellipse(c.x+42, c.y+9+bob, 12, 5.2, -0.20, 0, Math.PI*2);
+      ctx.ellipse(c.x+62, c.y+6+bob, 10, 4.8, 0.06, 0, Math.PI*2);
+      ctx.ellipse(c.x+80, c.y+12+bob, 8.5, 4.1, 0.18, 0, Math.PI*2);
+      ctx.fill();
+
+      // 輪郭を少しだけ光らせて透明感を出す
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(c.x+18, c.y+22+bob);
+      ctx.quadraticCurveTo(c.x+36, c.y-1+bob, c.x+52, c.y+1+bob);
+      ctx.quadraticCurveTo(c.x+70, c.y-2+bob, c.x+88, c.y+10+bob);
+      ctx.quadraticCurveTo(c.x+102, c.y+16+bob, c.x+108, c.y+22+bob);
+      ctx.stroke();
+
+      // 下端の細い透けライン
+      ctx.strokeStyle = "rgba(210,235,255,0.24)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (let x=0; x<=98; x+=10){
+        const px = c.x + x + 6;
+        const py = c.y + 24 + bob + Math.sin(frame*0.058 + idx + x*0.09) * 2.2;
         if (x === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
       ctx.stroke();
 
-      ctx.fillStyle = "rgba(255,210,235,0.28)";
+      // キラッとした小さな透明点
+      ctx.fillStyle = "rgba(255,255,255,0.46)";
       ctx.beginPath();
-      ctx.ellipse(c.x+58, c.y+20+bob, 42 + Math.sin(frame*0.03+idx)*1.6, 8 + Math.sin(frame*0.04+idx)*0.5, 0, 0, Math.PI*2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.beginPath();
-      ctx.arc(c.x+42, c.y+11+bob+Math.sin(frame*0.036+idx)*0.9, 3.5, 0, Math.PI*2);
-      ctx.arc(c.x+72, c.y+13+bob+Math.sin(frame*0.033+idx+1.2)*0.9, 2.6, 0, Math.PI*2);
+      ctx.arc(c.x+34, c.y+12+bob+Math.sin(frame*0.046+idx)*1.2, 2.6, 0, Math.PI*2);
+      ctx.arc(c.x+68, c.y+10+bob+Math.sin(frame*0.043+idx+1.2)*1.1, 2.2, 0, Math.PI*2);
+      ctx.arc(c.x+88, c.y+16+bob+Math.sin(frame*0.041+idx+2.0)*0.9, 1.8, 0, Math.PI*2);
       ctx.fill();
       ctx.restore();
     });
 
-    // 海：もっと青く、前のゆれる波線を復活
+    // 島の向こう、本当の水平線に並ぶ遠景のもこもこ入道雲
+    // 太陽みたいに、ふわっと大きくなったり小さくなったりしつつ、陰影も強める
+    horizonClouds.forEach((c, idx) => {
+      const drift = Math.sin(frame*c.drift + idx*1.2) * 5.5;
+      const bob = Math.sin(frame*0.013 + idx*0.95) * 4.0;
+      const pulse = 1 + Math.sin(frame*0.023 + c.puff) * 0.05 + Math.sin(frame*0.011 + idx*1.2) * 0.025;
+      const pulseX = pulse * (1 + Math.sin(frame*0.031 + c.puff + idx)*0.045);
+      const pulseY = (1 + Math.cos(frame*0.027 + c.puff)*0.06) * (1 + Math.sin(frame*0.016 + idx*0.9)*0.035);
+      const surge = Math.sin(frame*0.019 + c.puff + idx*0.85) * 8.8 + Math.sin(frame*0.047 + idx*1.7) * 3.0;
+      const towerStretch = 1 + Math.sin(frame*0.021 + c.puff + idx*0.6) * 0.11 + Math.max(0, surge) * 0.006;
+      const bellySway = Math.cos(frame*0.024 + idx*0.92 + c.puff) * 3.4;
+      const topLift = Math.sin(frame*0.028 + idx*0.7) * 3.6 + surge * 0.72;
+      const cloudWobble = Math.sin(frame*0.041 + idx*0.8) * 1.8 + surge * 0.09;
+      const baseW = 86 * c.scale;
+      const baseH = 22 * c.scale;
+      ctx.save();
+      ctx.translate(skyWobbleX*0.28 + drift, skyWobbleY*0.12 + bob + surge*0.34);
+      ctx.translate(c.x, c.y);
+      ctx.scale(pulseX, pulseY * towerStretch);
+
+      // 遠い水平線のかすみ
+      ctx.fillStyle = "rgba(255,246,236,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(0, 25, baseW*0.92, 7.5*c.scale, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // ほんのり外側の発光感
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath();
+      ctx.ellipse(-12*c.scale, 10, baseW*0.86, baseH*1.35, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // 雲の下側の影
+      const underShadow = ctx.createRadialGradient(0, 30, 6, 0, 30, baseW*0.95);
+      underShadow.addColorStop(0, "rgba(162,201,230,0.28)");
+      underShadow.addColorStop(0.55, "rgba(177,214,237,0.16)");
+      underShadow.addColorStop(1, "rgba(177,214,237,0)");
+      ctx.fillStyle = underShadow;
+      ctx.beginPath();
+      ctx.ellipse(0, 28 + bellySway*0.22 - surge*0.10, baseW*0.96, baseH*0.86, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // 雲本体グラデーション：上が明るく、下が青みのある影
+      const cloudBody = ctx.createLinearGradient(0, -28*c.scale, 0, 46*c.scale);
+      cloudBody.addColorStop(0, "rgba(255,255,255,0.99)");
+      cloudBody.addColorStop(0.52, "rgba(251,252,255,0.98)");
+      cloudBody.addColorStop(0.78, "rgba(234,243,252,0.96)");
+      cloudBody.addColorStop(1, "rgba(213,228,244,0.96)");
+      ctx.fillStyle = cloudBody;
+      ctx.beginPath();
+      ctx.ellipse(-42*c.scale, 14 + Math.sin(frame*0.035 + idx)*1.1 + surge*0.08, 20*c.scale, 17*c.scale, -0.08, 0, Math.PI*2);
+      ctx.ellipse(-12*c.scale, -6 + topLift*0.44, 29*c.scale, (28 + Math.max(0, surge)*0.14)*c.scale, 0.03, 0, Math.PI*2);
+      ctx.ellipse(6*c.scale, -18 + topLift*0.68, 20*c.scale, (21 + Math.max(0, surge)*0.22)*c.scale, 0.01, 0, Math.PI*2);
+      ctx.ellipse(22*c.scale, 7 + Math.sin(frame*0.03 + idx + 1.4)*1.4 + surge*0.10, 24*c.scale, 22*c.scale, 0.07, 0, Math.PI*2);
+      ctx.ellipse(49*c.scale, 20 + Math.sin(frame*0.032 + idx + 2.0)*1.1 - surge*0.04, 18*c.scale, 14*c.scale, 0.08, 0, Math.PI*2);
+      ctx.ellipse(-60*c.scale, 22 + Math.sin(frame*0.028 + idx + 0.3)*1.0 - surge*0.03, 14*c.scale, 10*c.scale, -0.12, 0, Math.PI*2);
+      ctx.ellipse(0, 28 - surge*0.12 + bellySway*0.16, baseW, baseH, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // 雲のもこもこ谷間の影を足す
+      ctx.fillStyle = "rgba(180,208,234,0.22)";
+      ctx.beginPath();
+      ctx.ellipse(-24*c.scale, 18 + cloudWobble*0.3 - surge*0.05, 18*c.scale, 10*c.scale, -0.16, 0, Math.PI*2);
+      ctx.ellipse(8*c.scale, 21 - cloudWobble*0.25 - surge*0.08, 22*c.scale, 11*c.scale, 0.02, 0, Math.PI*2);
+      ctx.ellipse(34*c.scale, 23 + cloudWobble*0.2 - surge*0.06, 16*c.scale, 8.5*c.scale, 0.18, 0, Math.PI*2);
+      ctx.fill();
+
+      // ほんのりピンクの反射
+      ctx.fillStyle = "rgba(255,233,244,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(-4*c.scale, 31, baseW*0.72, baseH*0.34, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // 上側のハイライト
+      ctx.fillStyle = "rgba(255,255,255,0.44)";
+      ctx.beginPath();
+      ctx.ellipse(-16*c.scale, 1 + topLift*0.20, 13*c.scale, 6.2*c.scale, -0.22, 0, Math.PI*2);
+      ctx.ellipse(20*c.scale, 8 - surge*0.05, 10*c.scale, 5*c.scale, -0.08, 0, Math.PI*2);
+      ctx.ellipse(-2*c.scale, -9 + topLift*0.26, 12*c.scale, 6.0*c.scale, 0.02, 0, Math.PI*2);
+      ctx.fill();
+
+      // 下端に淡い輪郭線を入れて立体感を補強
+      ctx.strokeStyle = "rgba(194,221,245,0.46)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(-baseW*0.82, 27 - surge*0.08);
+      ctx.quadraticCurveTo(-baseW*0.34, 36 - surge*0.08, 0, 32.5 + Math.sin(frame*0.02 + idx)*0.8 - surge*0.10);
+      ctx.quadraticCurveTo(baseW*0.4, 35 - surge*0.06, baseW*0.8, 27.5 - surge*0.08);
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // 奥の海：水平線から島の手前までの遠景レイヤー
+    const backSea = ctx.createLinearGradient(0, horizonY, 0, waterY + 6);
+    backSea.addColorStop(0, "#8fe5ff");
+    backSea.addColorStop(0.32, "#67d7fb");
+    backSea.addColorStop(0.72, "#47c4f0");
+    backSea.addColorStop(1, "#38b6ea");
+    ctx.fillStyle = backSea;
+    ctx.fillRect(0, horizonY, W, waterY - horizonY + 8);
+
+    // 本当の水平線：奥の海と空の境界
+    ctx.strokeStyle = "rgba(255,255,255,0.82)";
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    for(let x=-24; x<=W+24; x+=12){
+      const wave = Math.sin(x*0.012 + frame*0.028) * 0.9 + Math.cos(x*0.025 - frame*0.018) * 0.45;
+      if (x === -24) ctx.moveTo(x, horizonY + wave);
+      else ctx.lineTo(x, horizonY + wave);
+    }
+    ctx.stroke();
+
+    // 奥の海のうねうね
+    for(let row=0; row<5; row++){
+      const backSeaLineY = horizonY + 9 + row*11 + Math.sin(frame*0.022 + row*0.7) * 1.5;
+      ctx.strokeStyle = row === 0 ? "rgba(255,255,255,0.55)" : (row === 1 ? "rgba(255,246,188,0.32)" : "rgba(255,255,255,0.22)");
+      ctx.lineWidth = row === 0 ? 1.8 : 1.1;
+      ctx.beginPath();
+      for(let x=-20; x<=W+20; x+=14){
+        const wave = Math.sin(x*0.016 + frame*0.045 + row*0.9) * (1.8 - row*0.22)
+                   + Math.cos(x*0.038 - frame*0.03 + row*0.55) * 0.55;
+        if (x === -20) ctx.moveTo(x, backSeaLineY + wave);
+        else ctx.lineTo(x, backSeaLineY + wave);
+      }
+      ctx.stroke();
+    }
+
+    // 奥の海のきらきら
+    for(let i=0; i<34; i++){
+      const t = frame*0.03 + i*1.51;
+      const sx = (i*31 + Math.sin(t*0.72)*14 + frame*(0.10 + (i%5)*0.02)) % (W + 80) - 40;
+      const sy = horizonY + 6 + (i%6)*8 + Math.sin(t)*1.6;
+      const twinkle = 0.20 + (Math.sin(frame*0.08 + i*0.83) + 1) * 0.12;
+      const len = 1.8 + (i%3)*1.4;
+
+      ctx.strokeStyle = i % 4 === 0 ? `rgba(255,245,190,${twinkle})` : `rgba(255,255,255,${twinkle})`;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(sx - len, sy);
+      ctx.lineTo(sx + len, sy);
+      ctx.stroke();
+    }
+
+    // 奥の海に浮かぶ島：この島の向こうが本当の水平線
+    drawTinyIsland(156 + Math.sin(frame*0.014 + 0.5)*2.2, horizonY + 34 + Math.sin(frame*0.02 + 0.5)*1.2, 0.72);
+    drawTinyIsland(820 + Math.sin(frame*0.016 + 1.1)*1.8, horizonY + 40 + Math.sin(frame*0.018 + 1.1)*1.0, 0.48);
+
+    // 手前の海：ゲーム床になる近景レイヤー
     const sea = ctx.createLinearGradient(0, waterY-12, 0, H);
     sea.addColorStop(0, "#7fe1ff");
     sea.addColorStop(0.28, "#4ccaf4");
@@ -1661,30 +2009,30 @@ function drawBackground(){
     ctx.fillStyle = sea;
     ctx.fillRect(0, waterY-10 + Math.sin(frame*0.02)*1.2, W, H - waterY + 10);
 
-    // 水平線のきらきら・ゆらゆら
-    const horizonGlow = ctx.createLinearGradient(0, waterY - 20, 0, waterY + 42);
-    horizonGlow.addColorStop(0, "rgba(255,255,255,0)");
-    horizonGlow.addColorStop(0.38, "rgba(255,255,255,0.34)");
-    horizonGlow.addColorStop(0.58, "rgba(255,239,170,0.22)");
-    horizonGlow.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = horizonGlow;
+    // 手前の海面境界のきらきら・ゆらゆら（水平線ではない）
+    const frontSeaGlow = ctx.createLinearGradient(0, waterY - 20, 0, waterY + 42);
+    frontSeaGlow.addColorStop(0, "rgba(255,255,255,0)");
+    frontSeaGlow.addColorStop(0.38, "rgba(255,255,255,0.34)");
+    frontSeaGlow.addColorStop(0.58, "rgba(255,239,170,0.22)");
+    frontSeaGlow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = frontSeaGlow;
     ctx.fillRect(0, waterY - 20, W, 62);
 
     for(let row=0; row<4; row++){
-      const horizonY = waterY + row*6 + Math.sin(frame*0.032 + row*0.8)*1.8;
+      const frontSeaLineY = waterY + row*6 + Math.sin(frame*0.032 + row*0.8)*1.8;
       ctx.strokeStyle = row === 0 ? "rgba(255,255,255,0.88)" : (row === 1 ? "rgba(255,246,188,0.54)" : "rgba(255,255,255,0.34)");
       ctx.lineWidth = row === 0 ? 2.7 : 1.5;
       ctx.beginPath();
       for(let x=-20; x<=W+20; x+=14){
         const wave = Math.sin(x*0.018 + frame*0.06 + row*0.9) * (2.8 - row*0.45)
                    + Math.cos(x*0.041 - frame*0.04 + row*0.6) * 0.9;
-        if (x === -20) ctx.moveTo(x, horizonY + wave);
-        else ctx.lineTo(x, horizonY + wave);
+        if (x === -20) ctx.moveTo(x, frontSeaLineY + wave);
+        else ctx.lineTo(x, frontSeaLineY + wave);
       }
       ctx.stroke();
     }
 
-    // 奥の海のキラキラ
+    // 手前の海のキラキラ
     for(let i=0; i<46; i++){
       const t = frame*0.035 + i*1.73;
       const sx = (i*29 + Math.sin(t*0.77)*18 + frame*(0.16 + (i%5)*0.03)) % (W + 80) - 40;
@@ -1767,9 +2115,7 @@ function drawBackground(){
       ctx.fill();
     }
 
-    // 海の上のちいさな島たち（空中ではなく海にうかぶ感じ）
-    drawTinyIsland(152 + Math.sin(frame*0.02 + 0.5)*5, waterY - 84 + Math.sin(frame*0.03 + 0.5)*2.5, 0.9);
-    drawTinyIsland(834 + Math.sin(frame*0.024 + 1.1)*4, waterY - 74 + Math.sin(frame*0.028 + 1.1)*2.2, 0.6);
+    // 手前の海には島を置かない。島は奥の海に描画済み。
 
     // ぷかぷか浮かぶ小物たち
     drawFloatingIsland(744 + Math.sin(frame*0.028)*8, waterY + 95 + Math.sin(frame*0.05 + 0.8)*4.5, 0.9, 0.06);
