@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ぴち博士とGPTのかわいい風船わり 1面</title>
+<style>
+  :root{
+    --bg1:#8fd3ff;
+    --bg2:#dff5ff;
+    --panel:#ffffffd9;
+    --ink:#17324d;
+    --accent:#ff8cc6;
+    --accent2:#7be0b1;
+    --danger:#ff6b6b;
+    --water:#4fb6ff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:"Meiryo UI","Hiragino Sans","Yu Gothic UI",sans-serif;
+    background:linear-gradient(180deg,var(--bg2),var(--bg1));
+    color:var(--ink);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    min-height:100vh;
+    padding:14px;
+  }
+  h1{margin:6px 0 8px;font-size:clamp(22px,3vw,34px)}
+  .wrap{width:min(100%,960px)}
+  .topbar{
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:10px;
+  }
+  .card{
+    background:var(--panel);
+    border:3px solid #ffffff;
+    border-radius:18px;
+    box-shadow:0 10px 28px rgba(0,0,0,.12);
+    padding:10px 14px;
+  }
+  .info{display:flex;gap:10px;flex-wrap:wrap;font-weight:700}
+  .info span{
+    display:inline-block;background:#fff;border:2px solid #d8efff;border-radius:999px;padding:6px 12px;
+  }
+  #game{
+    width:100%;max-width:960px;aspect-ratio:4/3;border-radius:24px;border:4px solid white;
+    box-shadow:0 14px 36px rgba(0,0,0,.18);background:#9ad9ff;display:block;
+  }
+  .controls{margin-top:10px;line-height:1.7;font-size:15px}
+  button{
+    cursor:pointer;border:none;border-radius:999px;padding:10px 16px;font-size:15px;font-weight:700;
+    background:linear-gradient(180deg,#fff,#ecf7ff);color:var(--ink);border:2px solid #d5ecff;
+  }
+  button:hover{transform:translateY(-1px)}
+  .footer{margin-top:10px;font-size:13px;opacity:.9}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ぴち博士とGPTのかわいい風船わり 1面</h1>
+    <div class="topbar">
+      <div class="card info">
+        <span id="stageText">1面</span>
+        <span id="enemyText">のこり ぷくぷく 0</span>
+        <span id="balloonText">博士 0 / GPT 0</span>
+        <span id="stateText">準備OK</span>
+      </div>
+      <div class="card">
+        <button id="restartBtn">もう一回</button>
+      </div>
+    </div>
+    <canvas id="game" width="960" height="720"></canvas>
+    <div class="card controls">
+      <b>操作</b><br>
+      A / D：移動　スペース：パタパタ上昇　S：急降下　P：一時停止<br>
+      博士がプレイヤー、GPTは一緒に飛ぶ相棒です。みんな同じふわふわ操作で、ぷくぷく隊は近づくとほどほどに逃げ回ります。<br>
+      海にはきらきらの波、空にはおひさまの光。雲はふわふわ流れるトランポリン。上から触れると跳ね返ります。見えている風船へ頭か胴体が触れると「ぽんっ」。博士の風船が0個になっても床へ着地できれば、マウス照準＋左クリックのビームガンモード。命中した敵は風船が割れて、くるっと吹き飛びます。
+    </div>
+    <div class="footer">※ まるいキャラが、ふわふわ逃げたり追いかけたりするオリジナルの「かわいい風船わり」です。</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const ui = {
+    enemyText: document.getElementById("enemyText"),
+    balloonText: document.getElementById("balloonText"),
+    stateText: document.getElementById("stateText"),
+    restartBtn: document.getElementById("restartBtn")
+  };
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const waterY = 642;
+  const TIME_SCALE = 0.2; // ゲーム全体を元の1/5速度で進める
+  // 風船の浮力が重力の大半を打ち消す、ゆっくりした空中物理
+  const gravity = 0.059; // 前版より少しだけ重くして、下降を分かりやすくする
+  const buoyancyPerBalloon = 0.0215;
+  const flapForce = 0.052;
+  const horizontalPush = 0.105;
+  const diveForce = 0.045;
+  const horizontalDrag = 0.994;
+  const verticalDrag = 0.985;
+  const maxSpeed = 3.15;
+  const maxRiseSpeed = -2.65;
+  const maxFallSpeed = 2.65;
+  // 描画と当たり判定で共有する正本寸法
+  const BALLOON_RX = 12;
+  const BALLOON_RY = 16;
+  const FLOOR_SURFACE_Y = waterY - 2;
+  const BODY_BOUNCE = 0.9;
+  const PINBALL_KICK = 0.52;
+  const BUMP_COOLDOWN = 14;
+  const BEAM_SPEED = 7.2;       // TIME_SCALE込みで、見て避けられるゆっくり速度
+  const BEAM_RADIUS = 5.5;
+  const BEAM_COOLDOWN = 4.8;
+  const BEAM_KNOCKBACK = 3.0;
+  const BEAM_LIFT = 1.15;
+  const BEAM_SPIN = 0.22;
+  const GROUND_PUSH = 0.28;
+  const GROUND_MAX_SPEED = 2.4;
+
+  const keys = {};
+  const mouse = {x:W/2, y:H/2, inside:false};
+  let paused = false;
+  let frame = 0;
+  let gameOver = false;
+  let clear = false;
+
+  const clouds = [
+    {x:120,y:140,w:120,h:28, drift:0.16},
+    {x:360,y:250,w:150,h:28, drift:0.11},
+    {x:635,y:170,w:160,h:28, drift:0.14},
+    {x:760,y:320,w:130,h:28, drift:0.09},
+    {x:180,y:385,w:150,h:28, drift:0.12},
+    {x:515,y:460,w:140,h:28, drift:0.10}
+  ];
+
+  function makeActor(o){
+    return {
+      name:o.name, x:o.x, y:o.y, vx:o.vx||0, vy:o.vy||0,
+      color:o.color, accent:o.accent, outline:o.outline||"#17324d",
+      balloons:o.balloons ?? 2, alive:true, falling:false, dead:false,
+      ai:!!o.ai, team:o.team || "hero", face:o.face || "smile",
+      flapCooldown:0, hitCooldown:0, bumpCooldown:0, dir:1,
+      aiTimer:0, aiTargetX:o.x, aiTargetY:o.y, aiMood:"wander", aiPause:0,
+      flapVisual:0, flapping:false, tilt:0, spin:0, floorContact:false,
+      cloudCooldown:0,
+      gunMode:false, gunCooldown:0,
+      hat:o.hat || false, glasses:o.glasses || false, isGPT:o.isGPT || false,
+      kind:o.kind || "round", badge:o.badge || "heart",
+      balloonPalette:o.balloonPalette || ["#ff9fd5", "#ffd978"]
+    };
+  }
+
+  let player, ally, enemies, fish, popEffects, beams, beamSparks, modeNotice;
+  function resetGame(){
+    frame = 0; paused = false; gameOver = false; clear = false;
+    popEffects = [];
+    beams = [];
+    beamSparks = [];
+    modeNotice = 0;
+    canvas.style.cursor = "default";
+
+    player = makeActor({
+      name:"博士", x:180, y:210, color:"#ffe1b8", accent:"#7fc39b",
+      glasses:true, hat:false, face:"happy", team:"hero", kind:"doctor", badge:"heart",
+      retroProfessor:true,
+      balloonPalette:["#ff9fd5", "#ffd978"]
+    });
+    ally = makeActor({
+      name:"GPT", x:260, y:230, color:"#e2fff0", accent:"#7be0b1",
+      isGPT:true, face:"soft", team:"hero", ai:true, kind:"robot", badge:"star",
+      balloonPalette:["#75e5bd", "#9fdfff"]
+    });
+    enemies = [
+      makeActor({name:"ももぷく", x:690, y:160, color:"#ffe0ea", accent:"#ff9fbd", team:"enemy", ai:true, kind:"bunny", badge:"flower", balloonPalette:["#ffadc8", "#ffd6a5"]}),
+      makeActor({name:"みかんぷく", x:790, y:255, color:"#fff0d2", accent:"#ffbd73", team:"enemy", ai:true, kind:"cat", badge:"leaf", balloonPalette:["#ffc27d", "#fff09b"]}),
+      makeActor({name:"ぶどうぷく", x:590, y:355, color:"#eee2ff", accent:"#bca1ff", team:"enemy", ai:true, kind:"bear", badge:"moon", balloonPalette:["#c5a8ff", "#ffaedc"]})
+    ];
+    fish = {x:-80, y:waterY+18, vy:0, active:false, cooldown:220, vx:0};
+    updateUI();
+  }
+
+  function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+  function rand(min,max){ return Math.random()*(max-min)+min; }
+  function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+  function chancePerStep(p){ return Math.random() < 1 - Math.pow(1 - p, TIME_SCALE); }
+
+  function updateUI(){
+    const aliveEnemies = enemies.filter(e=>!e.dead).length;
+    ui.enemyText.textContent = `のこり ぷくぷく ${aliveEnemies}`;
+    ui.balloonText.textContent = player.gunMode
+      ? `博士 ビームガン / GPT ${Math.max(0,ally.balloons)}`
+      : `博士 ${Math.max(0,player.balloons)} / GPT ${Math.max(0,ally.balloons)}`;
+    ui.stateText.textContent = clear
+      ? "1面クリア！"
+      : gameOver
+        ? "ゲームオーバー"
+        : paused
+          ? "一時停止"
+          : player.gunMode
+            ? "博士のボートビームモード！"
+            : "かわいい風船わり中";
+    canvas.style.cursor = player.gunMode ? "crosshair" : "default";
+  }
+
+
+  function flap(a, strength=1, timeAmount=1){
+    if (a.dead || a.falling || a.balloons <= 0) return;
+    const balloonEfficiency = a.balloons >= 2 ? 1 : 0.54;
+    a.vy -= flapForce * strength * balloonEfficiency * timeAmount;
+    a.vy = Math.max(a.vy, maxRiseSpeed);
+    a.flapVisual = 7;
+  }
+
+  function actorFacing(a){
+    return a.dir < 0 ? -1 : 1;
+  }
+
+  // drawActor の translate → rotate → scale と同じ順番で座標変換する
+  function localToWorld(a, localX, localY){
+    const facingX = localX * actorFacing(a);
+    const angle = a.tilt || 0;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return {
+      x: a.x + facingX * c - localY * s,
+      y: a.y + facingX * s + localY * c
+    };
+  }
+
+  function worldToLocal(a, worldX, worldY){
+    const angle = a.tilt || 0;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const dx = worldX - a.x;
+    const dy = worldY - a.y;
+    const rotatedX = dx * c + dy * s;
+    const rotatedY = -dx * s + dy * c;
+    return {
+      x: rotatedX * actorFacing(a),
+      y: rotatedY
+    };
+  }
+
+  function balloonLocalPoint(index){
+    return {
+      x: index === 0 ? -13 : 13,
+      y: -43 - index * 2
+    };
+  }
+
+  function balloonPoint(a, index){
+    const p = balloonLocalPoint(index);
+    return localToWorld(a, p.x, p.y);
+  }
+
+  // キャラ同士の押し合いに使う、見た目に沿った頭＋胴体の2円
+  function actorCoreCircles(a){
+    const definitions = [
+      {x:0, y:0, r:19.5},
+      {x:0, y:24, r:16.0}
+    ];
+    return definitions.map(def => {
+      const p = localToWorld(a, def.x, def.y);
+      return {x:p.x, y:p.y, r:def.r};
+    });
+  }
+
+  // 風船を割る側は、頭と胴体の見えている部分だけを使用する
+  function actorAttackCircles(a){
+    return actorCoreCircles(a);
+  }
+
+  // 床判定は足先も含める。描画下端と水面が一致する
+  function actorFloorCircles(a){
+    const definitions = [
+      {x:0, y:0, r:19.5},
+      {x:0, y:24, r:16.0},
+      {x:-9, y:37, r:4.0},
+      {x:9, y:37, r:4.0}
+    ];
+    return definitions.map(def => {
+      const p = localToWorld(a, def.x, def.y);
+      return {x:p.x, y:p.y, r:def.r};
+    });
+  }
+
+  function actorBottom(a){
+    return Math.max(...actorFloorCircles(a).map(c => c.y + c.r));
+  }
+
+  function actorTop(a){
+    return Math.min(...actorCoreCircles(a).map(c => c.y - c.r));
+  }
+
+  function activateDoctorGunMode(a){
+    const penetration = actorBottom(a) - FLOOR_SURFACE_Y;
+    if (penetration > 0) a.y -= penetration + 0.05;
+
+    a.falling = false;
+    a.gunMode = true;
+    a.onBoat = true;
+    a.floorContact = true;
+    a.vx *= 0.25;
+    a.vy = 0;
+    a.tilt = 0;
+    a.spin = 0;
+    a.hitCooldown = 0;
+    a.gunCooldown = 0;
+    a.boatBob = FLOOR_SURFACE_Y + 9;
+    modeNotice = 210;
+    updateUI();
+  }
+
+  function doctorAim(){
+    const originX = player.x;
+    const originY = player.y + 12;
+    let dx = mouse.x - originX;
+    let dy = mouse.y - originY;
+    let length = Math.hypot(dx,dy);
+    if (length < 0.001){
+      dx = player.dir;
+      dy = 0;
+      length = 1;
+    }
+    return {
+      x:dx/length,
+      y:dy/length,
+      angle:Math.atan2(dy,dx)
+    };
+  }
+
+  function doctorGunGeometry(){
+    const aim = doctorAim();
+    const grip = {
+      x:player.x + aim.x * 9,
+      y:player.y + 14 + aim.y * 9
+    };
+    const muzzle = {
+      x:grip.x + aim.x * 35,
+      y:grip.y + aim.y * 35
+    };
+    return {aim, grip, muzzle};
+  }
+
+  function fireDoctorBeam(){
+    if (!player || !player.gunMode || player.dead || player.gunCooldown > 0) return;
+    if (paused || gameOver || clear) return;
+
+    const {aim, muzzle} = doctorGunGeometry();
+    beams.push({
+      x:muzzle.x,
+      y:muzzle.y,
+      vx:aim.x * BEAM_SPEED,
+      vy:aim.y * BEAM_SPEED,
+      r:BEAM_RADIUS,
+      life:720,
+      dead:false
+    });
+    player.gunCooldown = BEAM_COOLDOWN;
+    player.spin -= aim.y * 0.018;
+  }
+
+  function resolveFloorContact(a, allowDamage=true){
+    if (a.dead || a.falling) return;
+
+    const penetration = actorBottom(a) - FLOOR_SURFACE_Y;
+    if (penetration > 0){
+      const impactSpeed = a.vy;
+      a.y -= penetration + 0.05;
+
+      if (impactSpeed > 0){
+        a.vy = -Math.max(0.42, impactSpeed * 0.48);
+      }
+
+      // 水面へ新しく着地した瞬間だけ風船へダメージを与える
+      if (!a.floorContact && allowDamage && impactSpeed > 0.34){
+        takeHit(a);
+      }
+      a.floorContact = true;
+    } else if (actorBottom(a) < FLOOR_SURFACE_Y - 1.25){
+      a.floorContact = false;
+    }
+  }
+
+
+  function spawnPop(a, x, y){
+    const color = a.balloonPalette[Math.max(0, Math.min(a.balloonPalette.length - 1, a.balloons - 1))];
+    popEffects.push({x, y, color, life:30, maxLife:30});
+  }
+
+  function takeHit(a, popX=null, popY=null){
+    if (a.dead || a.hitCooldown > 0 || a.balloons <= 0) return;
+    const oldIndex = Math.max(0, a.balloons - 1);
+    const p = balloonPoint(a, oldIndex);
+    spawnPop(a, popX ?? p.x, popY ?? p.y);
+    a.balloons -= 1;
+    a.hitCooldown = 50;
+    a.vy = Math.min(a.vy + 0.7, 2.0);
+    if (a.balloons <= 0) a.falling = true;
+  }
+
+  function killActor(a){
+    a.dead = true; a.alive = false; a.falling = false; a.vx = 0; a.vy = 0;
+  }
+
+  function wrapX(a){
+    if (a.x < -30) a.x = W + 30;
+    if (a.x > W + 30) a.x = -30;
+  }
+
+  // プレイヤーもAIも、この同じ操作エンジンを使う
+  function applyMotionIntent(a, horizontal=0, flapNow=false, diveNow=false, flapStrength=1){
+    if (a.dead || a.falling || a.gunMode || clear || gameOver) return;
+    horizontal = clamp(horizontal, -1, 1);
+    if (Math.abs(horizontal) > 0.08){
+      a.vx += horizontalPush * horizontal * TIME_SCALE;
+      a.dir = horizontal < 0 ? -1 : 1;
+    }
+    a.flapping = !!flapNow;
+    if (flapNow) flap(a, flapStrength, TIME_SCALE);
+    if (diveNow) a.vy += diveForce * TIME_SCALE;
+  }
+
+  function playerControl(){
+    const horizontal = (keys["KeyD"] ? 1 : 0) - (keys["KeyA"] ? 1 : 0);
+
+    if (player.gunMode){
+      if (horizontal !== 0){
+        player.vx += horizontal * GROUND_PUSH * TIME_SCALE;
+      }
+      if (mouse.inside){
+        player.dir = mouse.x < player.x ? -1 : 1;
+      } else if (horizontal !== 0){
+        player.dir = horizontal < 0 ? -1 : 1;
+      }
+      player.flapping = false;
+      return;
+    }
+
+    applyMotionIntent(player, horizontal, !!keys["Space"], !!keys["KeyS"], 1);
+  }
+
+  function updateAllyAI(a){
+    if (a.dead) return;
+    const livingEnemies = enemies.filter(e=>!e.dead && !e.falling);
+    let target = livingEnemies.sort((m,n)=>dist(a,m)-dist(a,n))[0] || player;
+    a.aiTimer -= TIME_SCALE;
+    if (a.aiTimer <= 0){
+      a.aiTimer = rand(20, 38);
+      a.aiTargetX = target.x + rand(-35,35);
+      a.aiTargetY = target.y - rand(45,85);
+    }
+    const horizontal = a.aiTargetX < a.x - 12 ? -1 : a.aiTargetX > a.x + 12 ? 1 : 0;
+    const flapNow = a.y > a.aiTargetY + 8 || a.vy > 0.58 || a.y > waterY - 130;
+    const diveNow = a.y < a.aiTargetY - 85 && chancePerStep(0.035);
+    applyMotionIntent(a, horizontal, flapNow, diveNow, 0.96);
+  }
+
+  function updateEnemyAI(a){
+    if (a.dead || a.falling) return;
+    const heroes = [player, ally].filter(h=>!h.dead && !h.falling);
+    if (!heroes.length) return;
+    const nearest = heroes.sort((m,n)=>dist(a,m)-dist(a,n))[0];
+    const dangerDistance = dist(a, nearest);
+
+    a.aiTimer -= TIME_SCALE;
+    a.aiPause = Math.max(0, a.aiPause - TIME_SCALE);
+    if (a.aiTimer <= 0){
+      const shouldFlee = dangerDistance < 185 || Math.random() < 0.62;
+      a.aiMood = shouldFlee ? "flee" : "wander";
+      a.aiTimer = shouldFlee ? rand(26, 48) : rand(32, 62);
+
+      if (shouldFlee){
+        const away = nearest.x < a.x ? 1 : -1;
+        a.aiTargetX = clamp(a.x + away * rand(125, 235), 45, W - 45);
+        a.aiTargetY = clamp(a.y + rand(-115, 95), 95, waterY - 105);
+      } else {
+        a.aiTargetX = rand(70, W - 70);
+        a.aiTargetY = rand(105, waterY - 125);
+        if (Math.random() < 0.28) a.aiPause = rand(8, 18);
+      }
+    }
+
+    let horizontal = 0;
+    if (a.aiPause <= 0){
+      horizontal = a.aiTargetX < a.x - 15 ? -1 : a.aiTargetX > a.x + 15 ? 1 : 0;
+    }
+    const flapNow = a.y > a.aiTargetY + 10 || a.vy > 0.62 || a.y > waterY - 125;
+    const diveNow = a.y < a.aiTargetY - 75 && chancePerStep(0.04);
+    applyMotionIntent(a, horizontal, flapNow, diveNow, 0.94);
+  }
+
+  function updateActor(a){
+    if (a.dead) return;
+    if (a.hitCooldown > 0) a.hitCooldown = Math.max(0, a.hitCooldown - TIME_SCALE);
+    if (a.flapCooldown > 0) a.flapCooldown = Math.max(0, a.flapCooldown - TIME_SCALE);
+    if (a.bumpCooldown > 0) a.bumpCooldown = Math.max(0, a.bumpCooldown - TIME_SCALE);
+    if (a.cloudCooldown > 0) a.cloudCooldown = Math.max(0, a.cloudCooldown - TIME_SCALE);
+    if (a.flapVisual > 0) a.flapVisual = Math.max(0, a.flapVisual - TIME_SCALE);
+    if (a.gunCooldown > 0) a.gunCooldown = Math.max(0, a.gunCooldown - TIME_SCALE);
+
+    if (a.gunMode){
+      a.tilt = 0;
+      a.spin *= Math.pow(0.82, TIME_SCALE);
+      a.vx *= Math.pow(0.92, TIME_SCALE);
+      a.vx = clamp(a.vx, -GROUND_MAX_SPEED, GROUND_MAX_SPEED);
+      a.x += a.vx * TIME_SCALE;
+      a.x = clamp(a.x, 24, W - 24);
+      a.vy = 0;
+
+      const floorCorrection = actorBottom(a) - FLOOR_SURFACE_Y;
+      a.y -= floorCorrection;
+      a.floorContact = true;
+      return;
+    }
+
+    // ぶつかった時の「くるっ」を、すぐ落ち着く柔らかい回転にする
+    a.tilt += a.spin * TIME_SCALE;
+    a.spin *= Math.pow(0.90, TIME_SCALE);
+    a.tilt *= Math.pow(0.965, TIME_SCALE);
+    a.tilt = clamp(a.tilt, -0.32, 0.32);
+
+    // 少し強めた重力 - 風船の浮力。2個でもわずかに下降し、パタパタが必要
+    const buoyancy = a.falling ? 0 : buoyancyPerBalloon * Math.max(0, a.balloons);
+    const verticalAcceleration = (a.falling ? gravity * 1.8 : gravity) - buoyancy;
+    a.vy += verticalAcceleration * TIME_SCALE;
+
+    // 空気抵抗は強すぎず、速度が残るので慣性を楽しめる
+    a.vx *= Math.pow(horizontalDrag, TIME_SCALE);
+    a.vy *= Math.pow(verticalDrag, TIME_SCALE);
+    a.vx = clamp(a.vx,-maxSpeed,maxSpeed);
+    a.vy = clamp(a.vy,maxRiseSpeed,a.falling ? 4.0 : maxFallSpeed);
+
+    const previousBottom = actorBottom(a);
+    a.x += a.vx * TIME_SCALE;
+    a.y += a.vy * TIME_SCALE;
+    wrapX(a);
+
+    // 雲は貼りつく床ではなく、上から触れた瞬間だけ跳ねるトランポリン。
+    // 風船0個で落下中の博士は雲をすり抜け、救助ボートを目指す。
+    if (!a.falling && !a.gunMode && a.cloudCooldown <= 0 && a.vy > 0){
+      const currentBottom = actorBottom(a);
+
+      for (const c of clouds){
+        const overlapsX = a.x > c.x - 18 && a.x < c.x + c.w + 18;
+        const crossedCloudTop =
+          previousBottom <= c.y + 1.5 &&
+          currentBottom >= c.y;
+
+        if (!overlapsX || !crossedCloudTop) continue;
+
+        // 描画上の足元を雲の上面へ戻し、確実に上向きへ跳ね返す。
+        a.y -= (currentBottom - c.y) + 0.2;
+        a.vy = -Math.max(0.78, Math.abs(a.vy) * 0.72);
+        a.cloudCooldown = 9;
+        a.floorContact = false;
+
+        // 敵が一時停止中でも、雲の上で静止しないよう横へ抜けさせる。
+        if (a.team === "enemy"){
+          a.aiPause = 0;
+          let escapeDir = 0;
+          if (Math.abs(a.aiTargetX - a.x) > 8){
+            escapeDir = a.aiTargetX > a.x ? 1 : -1;
+          } else {
+            escapeDir = Math.random() < 0.5 ? -1 : 1;
+          }
+          if (Math.abs(a.vx) < 0.42){
+            a.vx += escapeDir * 0.72;
+          }
+          a.aiTimer = Math.min(a.aiTimer, 12);
+        }
+        break;
+      }
+    }
+
+    const topPenetration = 52 - actorTop(a);
+    if (topPenetration > 0){
+      a.y += topPenetration;
+      if (a.vy < 0) a.vy = Math.abs(a.vy) * 0.4;
+    }
+
+    if (a.falling) {
+      a.vx *= Math.pow(0.98, TIME_SCALE);
+
+      // 博士だけは、0風船のまま海へ落ちてもボートに乗ってビーム戦へ復帰できる
+      if (a === player && a.balloons <= 0 && actorBottom(a) >= FLOOR_SURFACE_Y){
+        activateDoctorGunMode(a);
+      } else if (a.y > waterY - 6) {
+        killActor(a);
+      }
+    } else {
+      resolveFloorContact(a, true);
+    }
+  }
+
+  function resolveBodyCollision(a,b){
+    if (a.dead || b.dead || a.falling || b.falling) return;
+
+    const circlesA = actorCoreCircles(a);
+    const circlesB = actorCoreCircles(b);
+    let contact = null;
+
+    for (const ca of circlesA){
+      for (const cb of circlesB){
+        let dx = cb.x - ca.x;
+        let dy = cb.y - ca.y;
+        let d2 = dx*dx + dy*dy;
+        const minDist = ca.r + cb.r;
+
+        if (d2 >= minDist*minDist) continue;
+
+        if (d2 < 0.0001){
+          dx = Math.random() < 0.5 ? -1 : 1;
+          dy = -0.12;
+          d2 = dx*dx + dy*dy;
+        }
+
+        const d = Math.sqrt(d2);
+        const overlap = minDist - d;
+        if (!contact || overlap > contact.overlap){
+          contact = {
+            nx:dx/d,
+            ny:dy/d,
+            overlap
+          };
+        }
+      }
+    }
+
+    if (!contact) return;
+
+    const {nx, ny, overlap} = contact;
+    const separation = overlap * 0.51 + 0.18;
+    a.x -= nx * separation;
+    a.y -= ny * separation;
+    b.x += nx * separation;
+    b.y += ny * separation;
+
+    const relativeNormalSpeed =
+      (b.vx - a.vx) * nx +
+      (b.vy - a.vy) * ny;
+
+    const freshBump = a.bumpCooldown <= 0 && b.bumpCooldown <= 0;
+
+    if (relativeNormalSpeed < 0){
+      const impulse = -(1 + BODY_BOUNCE) * relativeNormalSpeed * 0.5;
+      a.vx -= impulse * nx;
+      a.vy -= impulse * ny;
+      b.vx += impulse * nx;
+      b.vy += impulse * ny;
+    }
+
+    if (freshBump){
+      const approachBonus = Math.max(0, -relativeNormalSpeed) * 0.18;
+      const kick = PINBALL_KICK + approachBonus;
+
+      a.vx -= nx * kick;
+      a.vy -= ny * kick;
+      b.vx += nx * kick;
+      b.vy += ny * kick;
+
+      const spinDirection = clamp(nx * 0.12 + (b.vx - a.vx) * 0.018, -0.16, 0.16);
+      a.spin -= spinDirection;
+      b.spin += spinDirection;
+      a.bumpCooldown = BUMP_COOLDOWN;
+      b.bumpCooldown = BUMP_COOLDOWN;
+    }
+  }
+
+
+  // 衝突の押し戻し後に、床・天井へめり込んでいないか最終補正する
+  // 衝突の押し戻し後にも、描画形状を使って境界へ戻す
+  function stabilizeActorBounds(a){
+    if (a.dead) return;
+
+    if (a.gunMode){
+      a.x = clamp(a.x, 24, W - 24);
+      a.tilt = 0;
+      const floorCorrection = actorBottom(a) - FLOOR_SURFACE_Y;
+      a.y -= floorCorrection;
+      a.vy = 0;
+      return;
+    }
+
+    if (![a.x, a.y, a.vx, a.vy].every(Number.isFinite)){
+      a.x = W * 0.5;
+      a.y = 180;
+      a.vx = 0;
+      a.vy = -0.5;
+      a.tilt = 0;
+      a.spin = 0;
+      a.floorContact = false;
+    }
+
+    const topPenetration = 52 - actorTop(a);
+    if (topPenetration > 0){
+      a.y += topPenetration;
+      if (a.vy < 0) a.vy = Math.abs(a.vy) * 0.42;
+    }
+
+    resolveFloorContact(a, true);
+    wrapX(a);
+  }
+
+
+  function circleTouchesBalloonEllipse(circle, target, balloonIndex){
+    const center = balloonLocalPoint(balloonIndex);
+    const local = worldToLocal(target, circle.x, circle.y);
+
+    // 円対楕円。攻撃側円の半径ぶんだけ楕円を広げて判定する
+    const expandedX = BALLOON_RX + circle.r;
+    const expandedY = BALLOON_RY + circle.r;
+    const nx = (local.x - center.x) / expandedX;
+    const ny = (local.y - center.y) / expandedY;
+    return nx*nx + ny*ny <= 1;
+  }
+
+  function tryPopBalloon(attacker, target){
+    if (attacker.dead || target.dead || attacker.falling || target.falling) return;
+    if (attacker.team === target.team || target.hitCooldown > 0 || target.balloons <= 0) return;
+
+    const attackCircles = actorAttackCircles(attacker);
+
+    // 表示上いちばん外側の風船から確認する
+    for (let i = target.balloons - 1; i >= 0; i--){
+      const hit = attackCircles.some(circle =>
+        circleTouchesBalloonEllipse(circle, target, i)
+      );
+
+      if (hit){
+        const p = balloonPoint(target, i);
+        takeHit(target, p.x, p.y);
+
+        const dx = attacker.x - p.x;
+        const dy = attacker.y - p.y;
+        const len = Math.max(1, Math.hypot(dx,dy));
+        attacker.vx += (dx / len) * 0.28;
+        attacker.vy += (dy / len) * 0.28;
+        target.vy += 0.12;
+        break;
+      }
+    }
+  }
+
+
+  function resolveAllActorContacts(){
+    const actors = [player, ally, ...enemies].filter(a=>!a.dead);
+    for (let i=0; i<actors.length; i++){
+      for (let j=i+1; j<actors.length; j++) resolveBodyCollision(actors[i], actors[j]);
+    }
+    enemies.forEach(e=>{
+      tryPopBalloon(player, e);
+      tryPopBalloon(ally, e);
+      tryPopBalloon(e, player);
+      tryPopBalloon(e, ally);
+    });
+  }
+
+  function updatePopEffects(){
+    popEffects.forEach(p=>{
+      p.life -= TIME_SCALE;
+      p.y -= 0.14 * TIME_SCALE;
+    });
+    popEffects = popEffects.filter(p=>p.life > 0);
+  }
+
+  function spawnBeamSpark(x,y){
+    for (let i=0;i<8;i++){
+      const angle = Math.PI * 2 * i / 8 + Math.random() * 0.2;
+      beamSparks.push({
+        x, y,
+        vx:Math.cos(angle) * rand(0.35,1.0),
+        vy:Math.sin(angle) * rand(0.35,1.0),
+        life:24
+      });
+    }
+  }
+
+  function applyBeamKnockback(enemy, beam){
+    const speed = Math.max(0.001, Math.hypot(beam.vx, beam.vy));
+    const nx = beam.vx / speed;
+    const ny = beam.vy / speed;
+
+    // ビーム方向へ強く押し、必ず少し上へ浮かせる
+    enemy.vx += nx * BEAM_KNOCKBACK;
+    enemy.vy += ny * (BEAM_KNOCKBACK * 0.72) - BEAM_LIFT;
+
+    // 画面外へ瞬間移動しない範囲で、派手な速度を残す
+    enemy.vx = clamp(enemy.vx, -5.2, 5.2);
+    enemy.vy = clamp(enemy.vy, -4.0, 3.2);
+
+    // 横向きの力に合わせて、かわいくくるっと回転
+    enemy.spin += clamp(nx * BEAM_SPIN + (Math.random()-0.5)*0.07, -0.28, 0.28);
+    enemy.bumpCooldown = Math.max(enemy.bumpCooldown, 18);
+    enemy.floorContact = false;
+  }
+
+  function updateBeams(){
+    beams.forEach(beam => {
+      if (beam.dead) return;
+      beam.x += beam.vx * TIME_SCALE;
+      beam.y += beam.vy * TIME_SCALE;
+      beam.life -= 1;
+
+      for (const enemy of enemies){
+        if (beam.dead || enemy.dead || enemy.falling || enemy.balloons <= 0 || enemy.hitCooldown > 0) continue;
+
+        for (let i=enemy.balloons-1; i>=0; i--){
+          const shotCircle = {x:beam.x, y:beam.y, r:beam.r};
+          if (circleTouchesBalloonEllipse(shotCircle, enemy, i)){
+            const p = balloonPoint(enemy, i);
+            takeHit(enemy, p.x, p.y);
+            applyBeamKnockback(enemy, beam);
+            spawnBeamSpark(beam.x, beam.y);
+            beam.dead = true;
+            break;
+          }
+        }
+      }
+
+      if (beam.x < -40 || beam.x > W+40 || beam.y < -40 || beam.y > H+40 || beam.life <= 0){
+        beam.dead = true;
+      }
+    });
+    beams = beams.filter(beam => !beam.dead);
+
+    beamSparks.forEach(spark => {
+      spark.x += spark.vx * TIME_SCALE;
+      spark.y += spark.vy * TIME_SCALE;
+      spark.vx *= 0.97;
+      spark.vy *= 0.97;
+      spark.life -= 1;
+    });
+    beamSparks = beamSparks.filter(spark => spark.life > 0);
+  }
+
+  function updateFish(){
+    fish.cooldown -= TIME_SCALE;
+    if (!fish.active && fish.cooldown <= 0){
+      const lowTargets = [player, ally, ...enemies].filter(a => !a.dead && !a.falling && !a.gunMode && a.y > waterY - 110);
+      if (lowTargets.length){
+        const t = lowTargets[Math.floor(Math.random()*lowTargets.length)];
+        fish.active = true;
+        fish.x = t.x < W/2 ? -40 : W + 40;
+        fish.y = waterY + 18;
+        fish.vy = -5.8;
+        fish.vx = t.x < W/2 ? 3.1 : -3.1;
+      } else {
+        fish.cooldown = 80;
+      }
+    }
+    if (fish.active){
+      fish.x += fish.vx * TIME_SCALE;
+      fish.y += fish.vy * TIME_SCALE;
+      fish.vy += 0.16 * TIME_SCALE;
+
+      [player, ally, ...enemies].forEach(a => {
+        if (a.dead || a.gunMode) return;
+        const dx = a.x - fish.x;
+        const dy = a.y - fish.y;
+        if (dx*dx + dy*dy < 34*34) killActor(a);
+      });
+
+      if (fish.y > waterY + 20){
+        fish.active = false;
+        fish.cooldown = 240 + Math.floor(Math.random()*130);
+      }
+    }
+  }
+
+  function update(){
+    if (paused || gameOver || clear) return;
+    frame += TIME_SCALE;
+
+    clouds.forEach(c => {
+      c.x += (c.drift || 0.1) * TIME_SCALE;
+      if (c.x > W + 34) c.x = -c.w - 34;
+    });
+
+    playerControl();
+    updateAllyAI(ally);
+    enemies.forEach(updateEnemyAI);
+    updateActor(player);
+    updateActor(ally);
+    enemies.forEach(updateActor);
+    resolveAllActorContacts();
+    [player, ally, ...enemies].forEach(stabilizeActorBounds);
+    enemies.forEach(e => { if (!e.dead && e.falling && e.y > waterY - 5) killActor(e); });
+    updateBeams();
+    updateFish();
+    updatePopEffects();
+    if (modeNotice > 0) modeNotice -= 1;
+  }
+
+  function drawBalloon(x,y,color,stringColor="#6b6b6b"){
+    ctx.strokeStyle = stringColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x,y+17);
+    ctx.quadraticCurveTo(x+3,y+24,x,y+32);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x,y,BALLOON_RX,BALLOON_RY,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.16)";
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,.58)";
+    ctx.beginPath();
+    ctx.ellipse(x-4,y-6,3.5,5.5,0,0,Math.PI*2);
+    ctx.fill();
+
+    // 風船にも小さな笑顔
+    ctx.fillStyle = "rgba(23,50,77,.72)";
+    ctx.beginPath();
+    ctx.arc(x-3,y+1,1.2,0,Math.PI*2);
+    ctx.arc(x+3,y+1,1.2,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(23,50,77,.62)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x,y+3,3,0.12*Math.PI,0.88*Math.PI,false);
+    ctx.stroke();
+  }
+
+  function roundRect(x, y, w, h, r, fill, stroke) {
+    if (typeof r === 'number') r = {tl:r,tr:r,br:r,bl:r};
+    ctx.beginPath();
+    ctx.moveTo(x + r.tl, y);
+    ctx.lineTo(x + w - r.tr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+    ctx.lineTo(x + w, y + h - r.br);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+    ctx.lineTo(x + r.bl, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+    ctx.lineTo(x, y + r.tl);
+    ctx.quadraticCurveTo(x, y, x + r.tl, y);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  function drawActor(a){
+    if (a.dead) return;
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.tilt || 0);
+
+    if (a.hitCooldown > 0 && Math.floor(a.hitCooldown / 4) % 2 === 0) ctx.globalAlpha = 0.6;
+    if (a.dir < 0) ctx.scale(-1, 1);
+
+    const isFlapping = a.flapping || a.flapVisual > 0;
+    const flapWave = isFlapping ? Math.sin(frame * 0.35) : 0;
+    const retroProfessor = !!a.retroProfessor;
+    const skin = a.color || "#ffd9a8";
+    const coat = retroProfessor ? "#fffdfb" : (a.accent || "#ffbfdc");
+    const shirt = retroProfessor ? "#dff1ff" : (a.team === "enemy" ? "#fff0cf" : (a.isGPT ? "#dff8f0" : "#ffe8f4"));
+    const limb = skin;
+    const shoe = retroProfessor ? "#8b5a44" : (a.team === "enemy" ? "#ffbc9c" : (a.isGPT ? "#b8f3de" : "#ffc1dd"));
+    const hairColor = retroProfessor ? "#ffffff" : "#ffd1b1";
+    const bodyY = 16;
+
+    // balloons behind the character
+    const palette = a.balloonPalette || ["#ffb0da", "#ffe177"];
+    for (let i = 0; i < Math.max(0, a.balloons); i++){
+      const p = balloonLocalPoint(i);
+      drawBalloon(p.x, p.y, palette[i % palette.length], "rgba(90,90,90,0.9)");
+    }
+
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,.07)";
+    ctx.beginPath();
+    ctx.ellipse(0, 41, retroProfessor ? 18 : 16, retroProfessor ? 5.8 : 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // arms
+    const handY = bodyY + 9 + flapWave * 11;
+    const handX = isFlapping ? 23 : 17;
+    ctx.strokeStyle = limb;
+    ctx.lineWidth = 8;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-10, bodyY + 8); ctx.lineTo(-handX, handY);
+    ctx.moveTo(10, bodyY + 8); ctx.lineTo(handX, handY);
+    ctx.moveTo(-5.5, bodyY + 20); ctx.lineTo(-9, bodyY + 24);
+    ctx.moveTo(5.5, bodyY + 20); ctx.lineTo(9, bodyY + 24);
+    ctx.stroke();
+
+    // hands
+    ctx.fillStyle = limb;
+    ctx.beginPath(); ctx.arc(-handX, handY, 4.2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(handX, handY, 4.2, 0, Math.PI*2); ctx.fill();
+
+    // white coat body
+    ctx.fillStyle = coat;
+    roundRect(-18, bodyY, 36, 24, 12, true, false);
+    ctx.fillStyle = "#f4f8fb";
+    roundRect(-15, bodyY + 3, 30, 18, 8, true, false);
+    ctx.fillStyle = shirt;
+    roundRect(-9, bodyY + 5, 18, 11, 6, true, false);
+
+    if (retroProfessor){
+      // lapels
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(-4, bodyY + 4); ctx.lineTo(-13, bodyY + 10); ctx.lineTo(-4, bodyY + 15); ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(4, bodyY + 4); ctx.lineTo(13, bodyY + 10); ctx.lineTo(4, bodyY + 15); ctx.closePath();
+      ctx.fill();
+
+      // buttons
+      ctx.fillStyle = "#8cc3ea";
+      ctx.beginPath(); ctx.arc(0, bodyY + 11, 1.8, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, bodyY + 16.5, 1.8, 0, Math.PI*2); ctx.fill();
+
+      // red bow tie
+      ctx.fillStyle = "#de6464";
+      ctx.beginPath();
+      ctx.moveTo(-2, bodyY + 5.5);
+      ctx.lineTo(-10, bodyY + 10.5);
+      ctx.lineTo(-2, bodyY + 14.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(2, bodyY + 5.5);
+      ctx.lineTo(10, bodyY + 10.5);
+      ctx.lineTo(2, bodyY + 14.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#ffd8b8";
+      ctx.beginPath(); ctx.arc(0, bodyY + 10.2, 2.2, 0, Math.PI*2); ctx.fill();
+    }
+
+    // neck
+    ctx.fillStyle = skin;
+    roundRect(-4, bodyY - 2, 8, 7, 4, true, false);
+
+    if (retroProfessor){
+      // big fluffy side/rear hair so it reads clearly
+      ctx.fillStyle = hairColor;
+      const backHair = [
+        [-20,-10,7.2],[-24,-3,8.2],[-24,6,7.8],[-20,13,6.6],[-13,13,5.8],
+        [20,-10,7.2],[24,-3,8.2],[24,6,7.8],[20,13,6.6],[13,13,5.8]
+      ];
+      backHair.forEach(h => { ctx.beginPath(); ctx.arc(h[0], h[1], h[2], 0, Math.PI*2); ctx.fill(); });
+    }
+
+    // head
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, 0, retroProfessor ? 21 : 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ears
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(-18, 1, 4.4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(18, 1, 4.4, 0, Math.PI*2); ctx.fill();
+
+    if (retroProfessor){
+      // わたあめみたいな白髪あたま：横だけでなく上にもふわっとのせる
+      ctx.fillStyle = hairColor;
+      const leftHair = [[-20,-12,6.2],[-25,-6,7.6],[-25,3,7.6],[-22,11,6.8],[-16,13,5.6],[-12,9,5.2]];
+      const rightHair = [[20,-12,6.2],[25,-6,7.6],[25,3,7.6],[22,11,6.8],[16,13,5.6],[12,9,5.2]];
+      const topHair = [[-13,-18,6.2],[-6,-22,7.0],[2,-22.5,7.2],[10,-19,6.4],[0,-16,7.8]];
+      leftHair.forEach(h => { ctx.beginPath(); ctx.arc(h[0], h[1], h[2], 0, Math.PI*2); ctx.fill(); });
+      rightHair.forEach(h => { ctx.beginPath(); ctx.arc(h[0], h[1], h[2], 0, Math.PI*2); ctx.fill(); });
+      topHair.forEach(h => { ctx.beginPath(); ctx.arc(h[0], h[1], h[2], 0, Math.PI*2); ctx.fill(); });
+
+      // little cheek-side tufts
+      ctx.beginPath(); ctx.arc(-17, 15, 4.7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(17, 15, 4.7, 0, Math.PI*2); ctx.fill();
+
+      // ふんわり白髪の流れ
+      ctx.strokeStyle = "rgba(210,220,228,0.95)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(-12, -18);
+      ctx.quadraticCurveTo(-4, -24, 6, -20);
+      ctx.quadraticCurveTo(11, -18, 15, -12);
+      ctx.stroke();
+    } else if (a.team === "enemy"){
+      ctx.fillStyle = "#ffd1b1";
+      ctx.beginPath(); ctx.ellipse(0, -15, 14, 8, 0, Math.PI, 0); ctx.fill();
+    } else if (a.isGPT){
+      ctx.fillStyle = "#d9fff0";
+      roundRect(-12, -18, 24, 7, 4, true, false);
+      ctx.strokeStyle = "#7be0b1";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(0,-28); ctx.stroke();
+      ctx.fillStyle = "#7be0b1";
+      ctx.beginPath(); ctx.arc(0,-30,3,0,Math.PI*2); ctx.fill();
+    }
+
+    // round glasses
+    if (a.glasses || retroProfessor){
+      ctx.strokeStyle = retroProfessor ? "#575a66" : "#6a7694";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(-7, -2, retroProfessor ? 5.6 : 5.1, 0, Math.PI*2);
+      ctx.arc(7, -2, retroProfessor ? 5.6 : 5.1, 0, Math.PI*2);
+      ctx.moveTo(-1.8, -2);
+      ctx.lineTo(1.8, -2);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#223449";
+    ctx.beginPath(); ctx.arc(-7, -2, 1.8, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(7, -2, 1.8, 0, Math.PI*2); ctx.fill();
+
+    // nose
+    ctx.fillStyle = "#f4c99b";
+    ctx.beginPath();
+    ctx.arc(0, 3, retroProfessor ? 3.1 : 2.8, 0, Math.PI*2);
+    ctx.fill();
+
+    // moustache and mouth for professor
+    if (retroProfessor){
+      ctx.fillStyle = retroProfessor ? "#ffffff" : "#f7f7f7";
+      ctx.beginPath(); ctx.ellipse(-6.8, 8.2, 7.6, 4.8, -0.18, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(6.8, 8.2, 7.6, 4.8, 0.18, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = "#d88870";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 12.2, 4.8, 0.12*Math.PI, 0.88*Math.PI, false);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = a.team === "enemy" ? "#d7846f" : "#d96fa5";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(0, 8.5, 6.2, 0.08*Math.PI, 0.92*Math.PI, false);
+      ctx.stroke();
+    }
+
+    // feet
+    ctx.fillStyle = shoe;
+    ctx.beginPath(); ctx.ellipse(-9, 38, 6, 3.5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(9, 38, 6, 3.5, 0, 0, Math.PI*2); ctx.fill();
+
+    // name tag
+    ctx.fillStyle = "rgba(255,255,255,.95)";
+    roundRect(-27, 45, 54, 16, 8, true, false);
+    ctx.fillStyle = "#46657b";
+    ctx.font = "bold 10px Meiryo UI,sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(a.name, 0, 56);
+    ctx.restore();
+  }
+
+
+  function drawPopEffects(){
+    popEffects.forEach(p=>{
+      const t = 1 - p.life / p.maxLife;
+      const alpha = Math.max(0, p.life / p.maxLife);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(p.x,p.y);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 3;
+      for(let i=0;i<8;i++){
+        const ang = i * Math.PI / 4;
+        const r1 = 8 + t * 9;
+        const r2 = 17 + t * 14;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang)*r1, Math.sin(ang)*r1);
+        ctx.lineTo(Math.cos(ang)*r2, Math.sin(ang)*r2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "rgba(23,50,77,.45)";
+      ctx.lineWidth = 2;
+      roundRect(-25,-35-t*8,50,22,11,true,true);
+      ctx.fillStyle = "#17324d";
+      ctx.font = "bold 13px Meiryo UI,sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("ぽんっ！",0,-20-t*8);
+      ctx.restore();
+    });
+  }
+
+  function drawPuffCloud(x,y,s){
+    ctx.fillStyle = "rgba(255,255,255,.95)";
+    ctx.beginPath();
+    ctx.arc(x,y,s*0.34,0,Math.PI*2);
+    ctx.arc(x+s*0.32,y+2,s*0.28,0,Math.PI*2);
+    ctx.arc(x-s*0.3,y+8,s*0.26,0,Math.PI*2);
+    ctx.arc(x+s*0.08,y+12,s*0.24,0,Math.PI*2);
+    ctx.fill();
+  }
+
+
+  function drawSunRays(cx, cy){
+    ctx.save();
+
+    // 広くにじむ後光
+    const halo = ctx.createRadialGradient(cx, cy, 18, cx, cy, 440);
+    halo.addColorStop(0, "rgba(255,255,255,0.84)");
+    halo.addColorStop(0.16, "rgba(255,247,176,0.58)");
+    halo.addColorStop(0.38, "rgba(255,242,120,0.24)");
+    halo.addColorStop(0.72, "rgba(255,248,210,0.10)");
+    halo.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 440, 0, Math.PI*2);
+    ctx.fill();
+
+    // 太陽中心から広がる放射線状の光（以前の約2倍の広がり）
+    for (let i=0; i<34; i++){
+      const angle = -1.32 + i * (Math.PI * 1.30 / 33) + Math.sin(frame*0.018 + i*0.55)*0.024;
+      const inner = 28;
+      const outer = 310 + Math.sin(frame*0.032 + i*0.42)*24 + (i%4)*18;
+      const spread = 0.042 + (i%4)*0.005;
+
+      const grad = ctx.createLinearGradient(
+        cx + Math.cos(angle)*inner,
+        cy + Math.sin(angle)*inner,
+        cx + Math.cos(angle)*outer,
+        cy + Math.sin(angle)*outer
+      );
+      grad.addColorStop(0, "rgba(255,250,210,0.86)");
+      grad.addColorStop(0.22, "rgba(255,242,153,0.52)");
+      grad.addColorStop(0.68, "rgba(255,247,196,0.16)");
+      grad.addColorStop(1, "rgba(255,255,255,0)");
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle-spread)*inner, cy + Math.sin(angle-spread)*inner);
+      ctx.lineTo(cx + Math.cos(angle)*outer, cy + Math.sin(angle)*outer);
+      ctx.lineTo(cx + Math.cos(angle+spread)*inner, cy + Math.sin(angle+spread)*inner);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ふわっと漂うきらきら粒
+    for (let i=0; i<22; i++){
+      const angle = frame*0.005 + i * (Math.PI*2/22);
+      const r = 86 + (i%5)*26 + Math.sin(frame*0.028 + i)*8;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r * 0.72;
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2 + (i%3), 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSeaSparkle(x, y, size, alpha){
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x-size, y); ctx.lineTo(x+size, y);
+    ctx.moveTo(x, y-size); ctx.lineTo(x, y+size);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  
+  function drawBananaTree(x, y, scale=1){
+    ctx.save();
+    ctx.translate(x, y);
+    const treeSway = Math.sin(frame*0.032 + x*0.09 + y*0.05) * 0.1;
+    ctx.rotate(treeSway);
+    ctx.scale(scale, scale);
+    ctx.strokeStyle = "#9b6b42";
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, 16);
+    ctx.quadraticCurveTo(2, -10, -5, -40);
+    ctx.stroke();
+
+    const leaves = [
+      {a:-1.8, len:34, color:"#58c46b"},
+      {a:-1.05, len:42, color:"#5fda73"},
+      {a:-0.15, len:40, color:"#74dc6a"},
+      {a:0.65, len:34, color:"#59c96a"},
+      {a:1.35, len:30, color:"#7bdc7f"},
+    ];
+    leaves.forEach((l, idx) => {
+      ctx.save();
+      ctx.rotate(l.a + Math.sin(frame*0.05 + idx*0.8 + x*0.02)*0.12);
+      ctx.fillStyle = l.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -32);
+      ctx.quadraticCurveTo(l.len*0.55, -44, l.len, -28);
+      ctx.quadraticCurveTo(l.len*0.45, -18, 0, -26);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+
+    ctx.fillStyle = "#ffd75e";
+    for(let i=0;i<4;i++){
+      ctx.beginPath();
+      ctx.ellipse(4 + i*3, -18 + (i%2)*4, 3.2, 1.8, 0.45, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawTinyIsland(x=162, y=waterY-78, scale=1){
+    ctx.save();
+    ctx.translate(x + Math.sin(frame*0.018 + x*0.01)*2.2, y + Math.cos(frame*0.026 + x*0.008)*1.8);
+    ctx.rotate(Math.sin(frame*0.02 + x*0.01) * 0.035);
+    ctx.scale(scale, scale);
+
+    // ちいさな島の水影
+    ctx.fillStyle = "rgba(53,143,196,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(0, 22, 74 + Math.sin(frame*0.04 + x*0.01)*1.5, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f7df94";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 70, 22, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#f2c56d";
+    ctx.beginPath();
+    ctx.ellipse(6, 8, 58, 15, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(-10, -6, 24, 7, 0, 0, Math.PI*2);
+    ctx.fill();
+    drawBananaTree(-18, -4, 0.82);
+    drawBananaTree(8, -6, 0.92);
+    drawBananaTree(32, -2, 0.72);
+    ctx.restore();
+  }
+
+  function drawFloatingShell(x, y, scale=1, color="#ffd3e8", tilt=0){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt + Math.sin(frame*0.03 + x*0.01)*0.02);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
+    ctx.beginPath();
+    ctx.ellipse(0, 12, 15, 4, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(-14, 7);
+    ctx.quadraticCurveTo(-8, -10, 0, -14);
+    ctx.quadraticCurveTo(8, -10, 14, 7);
+    ctx.quadraticCurveTo(0, 11, -14, 7);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.75)";
+    ctx.lineWidth = 1.2;
+    for (let i=-2; i<=2; i++){
+      ctx.beginPath();
+      ctx.moveTo(i*4, -10);
+      ctx.quadraticCurveTo(i*2, -1, i*4, 7);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFloatingCrab(x, y, scale=1, tilt=0){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt + Math.sin(frame*0.03 + x*0.007)*0.03);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
+    ctx.beginPath();
+    ctx.ellipse(0, 14, 16, 4, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#ff8f7d";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    for (let i=0;i<3;i++){
+      const yy = 2 + i*4;
+      ctx.beginPath();
+      ctx.moveTo(-10, yy); ctx.lineTo(-18, yy+4);
+      ctx.moveTo(10, yy); ctx.lineTo(18, yy+4);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#ff705f";
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 13, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#ff705f";
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(-9, -1); ctx.lineTo(-16, -8); ctx.lineTo(-10, -10);
+    ctx.moveTo(9, -1); ctx.lineTo(16, -8); ctx.lineTo(10, -10);
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(-4, -7, 2.6, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, -7, 2.6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#2f4f5f";
+    ctx.beginPath(); ctx.arc(-4, -7, 1.1, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, -7, 1.1, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawFloatingIsland(x, y, scale=1, tilt=0){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt + Math.sin(frame*0.025 + x*0.01)*0.02);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
+    ctx.beginPath();
+    ctx.ellipse(0, 16, 32, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f7df94";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 30, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#f2c56d";
+    ctx.beginPath();
+    ctx.ellipse(4, 5, 24, 8, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.32)";
+    ctx.beginPath();
+    ctx.ellipse(-8, -3, 10, 3.5, 0, 0, Math.PI*2);
+    ctx.fill();
+    drawBananaTree(-8, -2, 0.34);
+    drawBananaTree(8, -1, 0.27);
+    ctx.restore();
+  }
+
+  function drawBoat(a){
+    if (!a || !a.onBoat || !a.gunMode || a.dead) return;
+    const boatX = a.x;
+    const boatY = FLOOR_SURFACE_Y + 9 + Math.sin(frame*0.06)*2.5;
+    a.boatBob = boatY;
+    ctx.save();
+    ctx.translate(boatX, boatY);
+
+    ctx.fillStyle = "#8d5b39";
+    ctx.beginPath();
+    ctx.moveTo(-44, 6);
+    ctx.quadraticCurveTo(-8, 24, 44, 6);
+    ctx.lineTo(36, 18);
+    ctx.quadraticCurveTo(0, 30, -36, 18);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#b57348";
+    ctx.beginPath();
+    ctx.moveTo(-36, 7);
+    ctx.quadraticCurveTo(0, 18, 36, 7);
+    ctx.lineTo(28, 14);
+    ctx.quadraticCurveTo(0, 21, -28, 14);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-28, 13);
+    ctx.quadraticCurveTo(0, 20, 28, 13);
+    ctx.stroke();
+
+    // mast and sail
+    ctx.strokeStyle = "#8d5b39";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, 6);
+    ctx.lineTo(0, -48);
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff9d5";
+    ctx.beginPath();
+    ctx.moveTo(1, -46);
+    ctx.quadraticCurveTo(24, -28, 2, -8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#ffd2ea";
+    ctx.beginPath();
+    ctx.arc(0, -52, 7, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#ffea7b";
+    ctx.beginPath();
+    ctx.arc(0, -52, 3.2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+function drawBackground(){
+    // お空グラデーション
+    const sky = ctx.createLinearGradient(0,0,0,H);
+    sky.addColorStop(0, "#8ed8ff");
+    sky.addColorStop(0.45, "#bfeeff");
+    sky.addColorStop(0.74, "#e8fbff");
+    sky.addColorStop(0.75, "#8fdfff");
+    sky.addColorStop(1, "#52b8ee");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0,0,W,H);
+
+    // おひさまのひかり
+    const glow = ctx.createRadialGradient(W*0.72, 88, 24, W*0.72, 88, 420);
+    glow.addColorStop(0, "rgba(255,255,255,0.40)");
+    glow.addColorStop(0.42, "rgba(255,247,180,0.24)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0,0,W,H);
+
+
+    // 空全体がゆらゆら見えるような、ちびっこ向けのカラフルベール
+    for (let band=0; band<5; band++){
+      const bandY = 34 + band*68 + Math.sin(frame*0.02 + band*0.8)*5;
+      ctx.fillStyle = band % 2 === 0 ? "rgba(255,255,255,0.075)" : "rgba(255,220,245,0.055)";
+      ctx.beginPath();
+      ctx.moveTo(-40, bandY);
+      for (let x=-40; x<=W+40; x+=18){
+        const y = bandY + Math.sin(x*0.015 + frame*0.032 + band)*12 + Math.cos(x*0.026 - frame*0.018 + band)*3.5;
+        ctx.lineTo(x, y);
+      }
+      for (let x=W+40; x>=-40; x-=18){
+        const y = bandY + 20 + Math.sin(x*0.015 + frame*0.032 + band + 0.8)*10 + Math.cos(x*0.024 - frame*0.018 + band + 1.1)*3;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 風も海みたいに：端から端まで長い、ゆらゆら風の線
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // まずは空気の帯をふんわりのせる
+    for (let i=0; i<7; i++){
+      const baseY = 62 + i*42 + Math.sin(frame*0.02 + i*0.8) * 4;
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.075)" : "rgba(188,242,255,0.065)";
+      ctx.beginPath();
+      ctx.moveTo(-40, baseY+8);
+      for (let x=-40; x<=W+40; x+=16){
+        const y = baseY + Math.sin(x*0.014 + frame*0.038 + i*0.7)*10 + Math.sin(x*0.031 - frame*0.03 + i)*3;
+        ctx.lineTo(x, y);
+      }
+      for (let x=W+40; x>=-40; x-=16){
+        const y = baseY + 16 + Math.sin(x*0.014 + frame*0.038 + i*0.7 + 0.65)*8 + Math.sin(x*0.029 - frame*0.03 + i)*2.4;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 海みたいにゆれる長い風の線
+    for (let row=0; row<11; row++){
+      const yBase = 52 + row*26 + Math.sin(frame*0.018 + row*0.9)*2.4;
+      ctx.strokeStyle = row % 2 === 0 ? "rgba(255,255,255,0.36)" : "rgba(185,240,255,0.28)";
+      ctx.lineWidth = row < 2 ? 3.3 : 2.2;
+      ctx.beginPath();
+      for (let x=-30; x<=W+30; x+=14){
+        const wave = Math.sin(x*0.018 + frame*0.055 + row*0.82) * (7.4 - row*0.55)
+                   + Math.sin(x*0.041 - frame*0.03 + row*0.55) * 1.9;
+        if (x === -30) ctx.moveTo(x, yBase + wave);
+        else ctx.lineTo(x, yBase + wave);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let x=-30; x<=W+30; x+=18){
+        const wave = Math.sin(x*0.017 + frame*0.05 + row*0.76 + 0.8) * (5.2 - row*0.38);
+        if (x === -30) ctx.moveTo(x, yBase + 9 + wave);
+        else ctx.lineTo(x, yBase + 9 + wave);
+      }
+      ctx.stroke();
+    }
+
+    // 空気のきらめき：見えそうで見えない揺れ
+    for (let i=0; i<22; i++){
+      const sx = (i*58 + frame*0.8*(0.7 + (i%4)*0.12)) % (W+80) - 40;
+      const sy = 64 + (i%8)*26 + Math.sin(frame*0.024 + i*0.9)*6;
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.16)" : "rgba(196,243,255,0.13)";
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 10 + (i%3)*3, 1.8 + (i%2)*0.7, Math.sin(frame*0.01 + i)*0.25, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    const sunX = W - 132 + Math.sin(frame*0.012) * 1.8;
+    const sunY = 92 + Math.sin(frame*0.02) * 2.2;
+    drawSunRays(sunX, sunY);
+    ctx.save();
+    ctx.translate(sunX, sunY);
+    ctx.fillStyle = "#ffe66d";
+    ctx.beginPath(); ctx.arc(0,0,42,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.34)";
+    ctx.beginPath(); ctx.arc(-12,-12,12,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#5d7385";
+    ctx.beginPath(); ctx.arc(-12,-4,3.2,0,Math.PI*2); ctx.arc(12,-4,3.2,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#e79f50";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0,8,12,0.08*Math.PI,0.92*Math.PI,false); ctx.stroke();
+    ctx.restore();
+
+    // うねうね雲：全部ちょっとずつ形と位置が動く
+    clouds.forEach((c, idx) => {
+      const bob = Math.sin(frame*0.012 + idx*0.8) * 3.5;
+      const sway = Math.sin(frame*0.018 + idx*1.15) * 8;
+      const puffA = 20 + Math.sin(frame*0.042 + idx*0.7) * 2.4;
+      const puffB = 26 + Math.sin(frame*0.037 + idx*1.1) * 2.8;
+      const puffC = 22 + Math.sin(frame*0.04 + idx*0.9 + 1.4) * 2.3;
+      const puffD = 16 + Math.sin(frame*0.045 + idx*0.6 + 2.1) * 1.9;
+      ctx.save();
+      ctx.translate(sway, 0);
+      ctx.fillStyle = "rgba(255,255,255,.97)";
+      ctx.beginPath();
+      ctx.arc(c.x+24, c.y+14+bob+Math.sin(frame*0.034+idx)*1.4, puffA, Math.PI*0.95, Math.PI*0.1, true);
+      ctx.arc(c.x+50, c.y+6+bob+Math.sin(frame*0.03+idx*1.3)*1.2, puffB, Math.PI, 0, true);
+      ctx.arc(c.x+80, c.y+14+bob+Math.sin(frame*0.033+idx*0.8+0.7)*1.5, puffC, Math.PI, 0, true);
+      ctx.arc(c.x+100, c.y+18+bob+Math.sin(frame*0.04+idx*0.5+1.4)*1.1, puffD, Math.PI, 0, true);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.34)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (let x=0; x<=96; x+=12){
+        const px = c.x + x + 4;
+        const py = c.y + 22 + bob + Math.sin(frame*0.045 + idx + x*0.06) * 2.2;
+        if (x === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,210,235,0.28)";
+      ctx.beginPath();
+      ctx.ellipse(c.x+58, c.y+20+bob, 42 + Math.sin(frame*0.03+idx)*1.6, 8 + Math.sin(frame*0.04+idx)*0.5, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.beginPath();
+      ctx.arc(c.x+42, c.y+11+bob+Math.sin(frame*0.036+idx)*0.9, 3.5, 0, Math.PI*2);
+      ctx.arc(c.x+72, c.y+13+bob+Math.sin(frame*0.033+idx+1.2)*0.9, 2.6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 海：もっと青く、前のゆれる波線を復活
+    const sea = ctx.createLinearGradient(0, waterY-12, 0, H);
+    sea.addColorStop(0, "#7fe1ff");
+    sea.addColorStop(0.28, "#4ccaf4");
+    sea.addColorStop(0.60, "#2faee5");
+    sea.addColorStop(1, "#1f89cf");
+    ctx.fillStyle = sea;
+    ctx.fillRect(0, waterY-10 + Math.sin(frame*0.02)*1.2, W, H - waterY + 10);
+
+    // 水平線のきらきら・ゆらゆら
+    const horizonGlow = ctx.createLinearGradient(0, waterY - 20, 0, waterY + 42);
+    horizonGlow.addColorStop(0, "rgba(255,255,255,0)");
+    horizonGlow.addColorStop(0.38, "rgba(255,255,255,0.34)");
+    horizonGlow.addColorStop(0.58, "rgba(255,239,170,0.22)");
+    horizonGlow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = horizonGlow;
+    ctx.fillRect(0, waterY - 20, W, 62);
+
+    for(let row=0; row<4; row++){
+      const horizonY = waterY + row*6 + Math.sin(frame*0.032 + row*0.8)*1.8;
+      ctx.strokeStyle = row === 0 ? "rgba(255,255,255,0.88)" : (row === 1 ? "rgba(255,246,188,0.54)" : "rgba(255,255,255,0.34)");
+      ctx.lineWidth = row === 0 ? 2.7 : 1.5;
+      ctx.beginPath();
+      for(let x=-20; x<=W+20; x+=14){
+        const wave = Math.sin(x*0.018 + frame*0.06 + row*0.9) * (2.8 - row*0.45)
+                   + Math.cos(x*0.041 - frame*0.04 + row*0.6) * 0.9;
+        if (x === -20) ctx.moveTo(x, horizonY + wave);
+        else ctx.lineTo(x, horizonY + wave);
+      }
+      ctx.stroke();
+    }
+
+    // 奥の海のキラキラ
+    for(let i=0; i<46; i++){
+      const t = frame*0.035 + i*1.73;
+      const sx = (i*29 + Math.sin(t*0.77)*18 + frame*(0.16 + (i%5)*0.03)) % (W + 80) - 40;
+      const sy = waterY + 4 + (i%7)*6 + Math.sin(t)*2.2;
+      const twinkle = 0.28 + (Math.sin(frame*0.09 + i*0.93) + 1) * 0.19;
+      const len = 2.5 + (i%3)*1.8;
+
+      ctx.strokeStyle = i % 4 === 0 ? `rgba(255,245,190,${twinkle})` : `rgba(255,255,255,${twinkle})`;
+      ctx.lineWidth = i % 5 === 0 ? 1.4 : 1.0;
+      ctx.beginPath();
+      ctx.moveTo(sx - len, sy);
+      ctx.lineTo(sx + len, sy);
+      ctx.moveTo(sx, sy - len*0.34);
+      ctx.lineTo(sx, sy + len*0.34);
+      ctx.stroke();
+
+      if(i % 3 !== 0){
+        ctx.fillStyle = i % 4 === 0 ? `rgba(255,240,170,${twinkle*0.78})` : `rgba(255,255,255,${twinkle*0.72})`;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, len*0.62, 0.9 + (i%2)*0.25, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    // おひさまの水面反射光
+    const reflectionCenter = sunX + Math.sin(frame*0.02)*3;
+    const reflection = ctx.createLinearGradient(reflectionCenter, waterY + 4, reflectionCenter, H);
+    reflection.addColorStop(0, "rgba(255,250,210,0.72)");
+    reflection.addColorStop(0.18, "rgba(255,244,180,0.48)");
+    reflection.addColorStop(0.42, "rgba(255,255,255,0.22)");
+    reflection.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(reflectionCenter - 16, waterY + 2);
+    ctx.quadraticCurveTo(reflectionCenter - 42, waterY + 84, reflectionCenter - 88, H);
+    ctx.lineTo(reflectionCenter + 88, H);
+    ctx.quadraticCurveTo(reflectionCenter + 44, waterY + 88, reflectionCenter + 16, waterY + 2);
+    ctx.closePath();
+    ctx.fillStyle = reflection;
+    ctx.fill();
+    ctx.restore();
+
+    for(let i=0; i<24; i++){
+      const ry = waterY + 10 + i*9 + Math.sin(frame*0.035 + i*0.7)*4;
+      const spread = 12 + i*1.8;
+      const rw = 8 + (i%4)*5 + Math.sin(frame*0.05 + i)*2;
+      const alpha = Math.max(0.06, 0.34 - i*0.01);
+      ctx.fillStyle = i % 3 === 0 ? `rgba(255,255,255,${alpha})` : `rgba(255,242,170,${alpha*0.86})`;
+      ctx.beginPath();
+      ctx.ellipse(reflectionCenter + Math.sin(frame*0.045 + i*1.2)*spread, ry, rw, 1.4 + (i%2)*0.6, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // 寄せる波のゆれる線
+    for(let row=0; row<6; row++){
+      const y = waterY + row*16 + Math.sin(frame*0.03 + row*0.9)*2.2;
+      ctx.strokeStyle = row === 0 ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.54)";
+      ctx.lineWidth = row === 0 ? 3.5 : 2.1;
+      ctx.beginPath();
+      for(let x=0; x<=W+20; x+=16){
+        const wave = Math.sin((x*0.02) + frame*0.055 + row*0.8) * (6.5-row*0.85);
+        if (x === 0) ctx.moveTo(x, y + wave);
+        else ctx.lineTo(x, y + wave);
+      }
+      ctx.stroke();
+    }
+
+    // 海面のきらきら
+    for(let i=0; i<22; i++){
+      const sx = (i*69 + (frame*1.2)*(0.28 + (i%3)*0.15)) % (W+40) - 20;
+      const sy = waterY + 22 + (i%6)*15 + Math.sin(frame*0.035 + i)*3;
+      drawSeaSparkle(sx, sy, 3 + (i%3), 0.35 + (i%4)*0.08);
+    }
+
+    // 白波
+    ctx.fillStyle = "rgba(255,255,255,.58)";
+    for(let i=0;i<W;i+=42){
+      ctx.beginPath();
+      ctx.arc(i + (frame%42), waterY+6, 10, Math.PI, 0);
+      ctx.fill();
+    }
+
+    // 海の上のちいさな島たち（空中ではなく海にうかぶ感じ）
+    drawTinyIsland(152 + Math.sin(frame*0.02 + 0.5)*5, waterY - 84 + Math.sin(frame*0.03 + 0.5)*2.5, 0.9);
+    drawTinyIsland(834 + Math.sin(frame*0.024 + 1.1)*4, waterY - 74 + Math.sin(frame*0.028 + 1.1)*2.2, 0.6);
+
+    // ぷかぷか浮かぶ小物たち
+    drawFloatingIsland(744 + Math.sin(frame*0.028)*8, waterY + 95 + Math.sin(frame*0.05 + 0.8)*4.5, 0.9, 0.06);
+    drawFloatingShell(236 + Math.sin(frame*0.022+0.7)*5, waterY + 122 + Math.sin(frame*0.055 + 1.1)*4.2, 1.0, "#ffd3e8", 0.24);
+    drawFloatingShell(332 + Math.sin(frame*0.025+1.6)*4, waterY + 140 + Math.sin(frame*0.052 + 2.4)*3.7, 0.82, "#ffe7a8", -0.22);
+    drawFloatingCrab(884 + Math.sin(frame*0.03+2.2)*6, waterY + 126 + Math.sin(frame*0.06 + 1.9)*4.1, 0.95, 0.18);
+
+    // 前景の子ども向けアート感
+    for(let i=0;i<8;i++){
+      const bx = 100 + i*130 + Math.sin(frame*0.015 + i)*10;
+      const by = H-55 + Math.cos(frame*0.03+i)*4 + Math.sin(frame*0.055 + i*0.7)*2.5;
+      ctx.fillStyle = i%2===0 ? "rgba(255,185,216,0.35)" : "rgba(255,239,150,0.28)";
+      ctx.beginPath();
+      ctx.arc(bx, by, 10 + Math.sin(frame*0.04+i)*0.9, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(bx-8, by+6, 6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(bx+8, by+6, 6, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+
+  function drawBeams(){
+    beams.forEach(beam => {
+      ctx.save();
+      ctx.translate(beam.x, beam.y);
+      ctx.rotate(Math.atan2(beam.vy, beam.vx));
+      ctx.shadowColor = "#ff7dd0";
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = "#fff7a8";
+      roundRect(-13,-4,26,8,4,true,false);
+      ctx.fillStyle = "#ff8ed1";
+      roundRect(-9,-2,18,4,2,true,false);
+      ctx.restore();
+    });
+
+    beamSparks.forEach(spark => {
+      ctx.save();
+      ctx.globalAlpha = spark.life / 24;
+      ctx.fillStyle = "#fff6a5";
+      ctx.beginPath();
+      ctx.arc(spark.x, spark.y, 2.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawDoctorBeamGun(){
+    if (!player.gunMode || player.dead) return;
+    const {aim, grip, muzzle} = doctorGunGeometry();
+
+    ctx.save();
+    ctx.translate(grip.x, grip.y);
+    ctx.rotate(aim.angle);
+    ctx.shadowColor = "rgba(255,105,190,.45)";
+    ctx.shadowBlur = 8;
+
+    ctx.fillStyle = "#ff9dcd";
+    roundRect(-4,-7,31,14,7,true,false);
+    ctx.fillStyle = "#fff2a6";
+    roundRect(18,-4,19,8,4,true,false);
+    ctx.fillStyle = "#b7f1e0";
+    roundRect(2,5,10,13,4,true,false);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(5,-1,3.4,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // 銃口の小さな待機光
+    ctx.save();
+    ctx.globalAlpha = 0.65 + Math.sin(frame*0.12)*0.2;
+    ctx.fillStyle = "#fff7a8";
+    ctx.beginPath();
+    ctx.arc(muzzle.x, muzzle.y, 4, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    if (mouse.inside){
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,105,190,.65)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5,8]);
+      ctx.beginPath();
+      ctx.moveTo(muzzle.x, muzzle.y);
+      ctx.lineTo(mouse.x, mouse.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = "#ff71bd";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 10, 0, Math.PI*2);
+      ctx.moveTo(mouse.x-15, mouse.y);
+      ctx.lineTo(mouse.x-6, mouse.y);
+      ctx.moveTo(mouse.x+6, mouse.y);
+      ctx.lineTo(mouse.x+15, mouse.y);
+      ctx.moveTo(mouse.x, mouse.y-15);
+      ctx.lineTo(mouse.x, mouse.y-6);
+      ctx.moveTo(mouse.x, mouse.y+6);
+      ctx.lineTo(mouse.x, mouse.y+15);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawModeNotice(){
+    if (modeNotice <= 0 || !player.gunMode) return;
+    const alpha = Math.min(1, modeNotice / 35);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(255,255,255,.94)";
+    roundRect(225,78,510,78,20,true,false);
+    ctx.fillStyle = "#d94d9d";
+    ctx.textAlign = "center";
+    ctx.font = "bold 23px Meiryo UI,sans-serif";
+    ctx.fillText("着地成功！ 博士のビームガンモード", W/2, 111);
+    ctx.fillStyle = "#35566d";
+    ctx.font = "16px Meiryo UI,sans-serif";
+    ctx.fillText("カーソルで方向を決めて、左クリックでゆっくり発射", W/2, 139);
+    ctx.restore();
+  }
+
+  function drawFish(){
+    if (!fish.active) return;
+    ctx.save();
+    ctx.translate(fish.x, fish.y);
+    ctx.scale(fish.vx < 0 ? -1 : 1, 1);
+    ctx.fillStyle = "#3e6bb6";
+    ctx.beginPath();
+    ctx.ellipse(0,0,30,18,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-26,0); ctx.lineTo(-48,-15); ctx.lineTo(-42,0); ctx.lineTo(-48,15); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(10,-3,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.beginPath(); ctx.arc(11,-3,2,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawOverlay(){
+    if (!gameOver && !clear && frame > 10) return;
+    ctx.save();
+    ctx.fillStyle = "rgba(14,41,71,.18)";
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = "#ffffff";
+    roundRect(180,180,600,220,26,true,false);
+    ctx.fillStyle = "#17324d";
+    ctx.textAlign = "center";
+    if (frame < 10){
+      ctx.font = "bold 34px Meiryo UI,sans-serif";
+      ctx.fillText("1面 スタート！", W/2, 250);
+      ctx.font = "20px Meiryo UI,sans-serif";
+      ctx.fillText("博士を操作して、GPTといっしょにぷくぷく隊の風船を割ろう", W/2, 300);
+      ctx.fillText("おひさまと波のステージ！ 風船0個でも着地できればビームで復活！", W/2, 340);
+    } else if (clear){
+      ctx.font = "bold 38px Meiryo UI,sans-serif";
+      ctx.fillText("1面クリア！", W/2, 250);
+      ctx.font = "21px Meiryo UI,sans-serif";
+      ctx.fillText("博士とGPTのぷくぷくコンビ、勝利です。", W/2, 303);
+      ctx.fillText("「もう一回」で再挑戦できます。", W/2, 340);
+    } else if (gameOver){
+      ctx.font = "bold 38px Meiryo UI,sans-serif";
+      ctx.fillText("ゲームオーバー", W/2, 250);
+      ctx.font = "21px Meiryo UI,sans-serif";
+      ctx.fillText("博士もGPTもお水にぽちゃん…。", W/2, 303);
+      ctx.fillText("「もう一回」で再挑戦できます。", W/2, 340);
+    }
+    ctx.restore();
+  }
+
+  function render(){
+    drawBackground();
+    drawFish();
+    drawBeams();
+    enemies.forEach(drawActor);
+    drawActor(ally);
+    drawBoat(player);
+    drawActor(player);
+    drawDoctorBeamGun();
+    drawPopEffects();
+    drawModeNotice();
+
+    ctx.fillStyle = "rgba(255,255,255,.8)";
+    roundRect(18,16,170,46,16,true,false);
+    ctx.fillStyle = "#17324d";
+    ctx.font = "bold 18px Meiryo UI,sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("1面 きらきら海べ", 30, 45);
+
+    drawOverlay();
+  }
+
+  function loop(){ update(); render(); requestAnimationFrame(loop); }
+
+  function updateMousePosition(e){
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (W / rect.width);
+    mouse.y = (e.clientY - rect.top) * (H / rect.height);
+  }
+
+  canvas.addEventListener("mousemove", e => {
+    updateMousePosition(e);
+    mouse.inside = true;
+  });
+
+  canvas.addEventListener("mouseenter", e => {
+    updateMousePosition(e);
+    mouse.inside = true;
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    mouse.inside = false;
+  });
+
+  canvas.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    updateMousePosition(e);
+    mouse.inside = true;
+    if (player && player.gunMode){
+      e.preventDefault();
+      fireDoctorBeam();
+    }
+  });
+
+  window.addEventListener("keydown", e => {
+    if (["KeyA","KeyD","KeyS","Space"].includes(e.code)) e.preventDefault();
+    if (e.code === "KeyP") { paused = !paused; updateUI(); return; }
+    keys[e.code] = true;
+  });
+  window.addEventListener("keyup", e => {
+    keys[e.code] = false;
+    if (e.code === "Space" && player) player.flapping = false;
+  });
+
+  ui.restartBtn.addEventListener("click", resetGame);
+
+  resetGame();
+  loop();
+})();
+</script>
+</body>
+</html>
